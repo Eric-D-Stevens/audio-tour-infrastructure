@@ -73,8 +73,11 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
 
     // Geolocation Place Gathering Lambda
     const geolocationLambda = new lambda.Function(this, 'GeolocationLambda', {
-      runtime: lambda.Runtime.PYTHON_3_9,
-      code: lambda.Code.fromAsset('lambda/geolocation'),
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(
+        s3.Bucket.fromBucketName(this, 'LambdaBucket', process.env.LAMBDA_BUCKET || 'your-lambda-bucket'),
+        'geolocation.zip'
+      ),
       handler: 'index.handler',
       timeout: cdk.Duration.seconds(30),
       environment: {
@@ -85,8 +88,11 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
 
     // Audio Tour Generation Lambda
     const audioGenerationLambda = new lambda.Function(this, 'AudioGenerationLambda', {
-      runtime: lambda.Runtime.PYTHON_3_9,
-      code: lambda.Code.fromAsset('lambda/audio-generation'),
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(
+        s3.Bucket.fromBucketName(this, 'LambdaBucket', process.env.LAMBDA_BUCKET || 'your-lambda-bucket'),
+        'audio-generation.zip'
+      ),
       handler: 'index.handler',
       timeout: cdk.Duration.minutes(5), // Longer timeout for API calls and processing
       memorySize: 1024, // More memory for processing audio
