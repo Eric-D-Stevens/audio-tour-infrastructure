@@ -8,6 +8,7 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 export class AudioTourInfrastructureStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -74,6 +75,11 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // Backend Lambda Code Bucket
     const lambdaBucket = s3.Bucket.fromBucketName(this, 'LambdaBucket', process.env.LAMBDA_BUCKET || 'audio-tour-lambda-deployment-bucket');
 
+    // Create Secrets Manager resources
+    const googleMapsApiKeySecret = secretsmanager.Secret.fromSecretNameV2(this, 'GoogleMapsApiKey', 'google-maps-api-key');
+    const openaiApiKeySecret = secretsmanager.Secret.fromSecretNameV2(this, 'OpenAIApiKey', 'openai-api-key');
+    const elevenlabsApiKeySecret = secretsmanager.Secret.fromSecretNameV2(this, 'ElevenLabsApiKey', 'elevenlabs-api-key');
+
     // Geolocation Place Gathering Lambda
     const geolocationLambda = new lambda.Function(this, 'GeolocationLambda', {
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -82,9 +88,12 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: {
         PLACES_TABLE_NAME: placesTable.tableName,
-        GOOGLE_MAPS_API_KEY: cdk.SecretValue.secretsManager('google-maps-api-key').toString(),
+        GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
       },
     });
+    
+    // Grant the Lambda function permission to read the secret
+    googleMapsApiKeySecret.grantRead(geolocationLambda);
 
     // Audio Tour Generation Lambda
     const audioGenerationLambda = new lambda.Function(this, 'AudioGenerationLambda', {
@@ -95,11 +104,17 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       memorySize: 1024, // More memory for processing audio
       environment: {
         CONTENT_BUCKET_NAME: contentBucket.bucketName,
-        OPENAI_API_KEY: cdk.SecretValue.secretsManager('openai-api-key').toString(),
-        ELEVENLABS_API_KEY: cdk.SecretValue.secretsManager('elevenlabs-api-key').toString(),
+        OPENAI_API_KEY_SECRET_NAME: openaiApiKeySecret.secretName,
+        ELEVENLABS_API_KEY_SECRET_NAME: elevenlabsApiKeySecret.secretName,
+        GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
         CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
       },
     });
+    
+    // Grant the Lambda function permission to read the secrets
+    openaiApiKeySecret.grantRead(audioGenerationLambda);
+    elevenlabsApiKeySecret.grantRead(audioGenerationLambda);
+    googleMapsApiKeySecret.grantRead(audioGenerationLambda);
 
     // Grant permissions
     contentBucket.grantReadWrite(audioGenerationLambda);
