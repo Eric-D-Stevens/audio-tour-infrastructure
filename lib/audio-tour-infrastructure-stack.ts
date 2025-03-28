@@ -71,13 +71,13 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       generateSecret: false,
     });
 
+    // Backend Lambda Code Bucket
+    const lambdaBucket = s3.Bucket.fromBucketName(this, 'LambdaBucket', process.env.LAMBDA_BUCKET || 'audio-tour-lambda-deployment-bucket');
+
     // Geolocation Place Gathering Lambda
     const geolocationLambda = new lambda.Function(this, 'GeolocationLambda', {
       runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(
-        s3.Bucket.fromBucketName(this, 'LambdaBucket', process.env.LAMBDA_BUCKET || 'your-lambda-bucket'),
-        'geolocation.zip'
-      ),
+      code: lambda.Code.fromBucket(lambdaBucket, 'geolocation.zip'),
       handler: 'index.handler',
       timeout: cdk.Duration.seconds(30),
       environment: {
@@ -89,10 +89,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // Audio Tour Generation Lambda
     const audioGenerationLambda = new lambda.Function(this, 'AudioGenerationLambda', {
       runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(
-        s3.Bucket.fromBucketName(this, 'LambdaBucket', process.env.LAMBDA_BUCKET || 'your-lambda-bucket'),
-        'audio-generation.zip'
-      ),
+      code: lambda.Code.fromBucket(lambdaBucket, 'audio-generation.zip'),
       handler: 'index.handler',
       timeout: cdk.Duration.minutes(5), // Longer timeout for API calls and processing
       memorySize: 1024, // More memory for processing audio
