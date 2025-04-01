@@ -2,8 +2,10 @@ name: Deploy Infrastructure
 
 on:
   push:
-    branches: [ main]
+    branches: [ main ]
   workflow_dispatch:
+  repository_dispatch:
+    types: [trigger-infra-deploy]
 
 jobs:
   deploy:
