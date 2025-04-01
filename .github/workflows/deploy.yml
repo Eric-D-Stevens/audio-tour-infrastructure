@@ -30,7 +30,21 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_REGION }}
     
+    - name: Set Lambda version
+      run: |
+        # If triggered by lambda-changed event, use the version from the payload
+        # Otherwise use 'latest' as the version
+        if [[ "${{ github.event_name }}" == "repository_dispatch" && "${{ github.event.action }}" == "lambda-changed" ]]; then
+          echo "LAMBDA_VERSION=${{ github.event.client_payload.version }}" >> $GITHUB_ENV
+          echo "Using Lambda version: ${{ github.event.client_payload.version }}"
+        else
+          echo "LAMBDA_VERSION=latest" >> $GITHUB_ENV
+          echo "Using Lambda version: latest"
+        fi
+    
     - name: Deploy with CDK
       run: |
         npm run build
         npx cdk deploy --all --require-approval never
+      env:
+        LAMBDA_VERSION: ${{ env.LAMBDA_VERSION }}

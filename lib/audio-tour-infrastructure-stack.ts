@@ -74,6 +74,11 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
 
     // Backend Lambda Code Bucket
     const lambdaBucket = s3.Bucket.fromBucketName(this, 'LambdaBucket', process.env.LAMBDA_BUCKET || 'audio-tour-lambda-deployment-bucket-us-west-2');
+    
+    // Get Lambda version from environment variable
+    // If not provided, use 'latest' which will use non-versioned files
+    const lambdaVersion = process.env.LAMBDA_VERSION || 'latest';
+    console.log(`Deploying with Lambda version: ${lambdaVersion}`);
 
     // Create Secrets Manager resources
     const googleMapsApiKeySecret = secretsmanager.Secret.fromSecretNameV2(this, 'GoogleMapsApiKey', 'google-maps-api-key');
@@ -83,12 +88,13 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // Geolocation Place Gathering Lambda
     const geolocationLambda = new lambda.Function(this, 'GeolocationLambda', {
       runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, 'geolocation.zip'),
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? 'geolocation.zip' : `geolocation-${lambdaVersion}.zip`),
       handler: 'index.handler',
       timeout: cdk.Duration.seconds(30),
       environment: {
         PLACES_TABLE_NAME: placesTable.tableName,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
+        LAMBDA_VERSION: lambdaVersion,
       },
     });
     
@@ -98,7 +104,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // Audio Tour Generation Lambda
     const audioGenerationLambda = new lambda.Function(this, 'AudioGenerationLambda', {
       runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, 'audio-generation.zip'),
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? 'audio-generation.zip' : `audio-generation-${lambdaVersion}.zip`),
       handler: 'index.handler',
       timeout: cdk.Duration.minutes(5), // Longer timeout for API calls and processing
       memorySize: 1024, // More memory for processing audio
@@ -108,6 +114,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
         ELEVENLABS_API_KEY_SECRET_NAME: elevenlabsApiKeySecret.secretName,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
         CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
+        LAMBDA_VERSION: lambdaVersion,
       },
     });
     
