@@ -5,7 +5,7 @@ on:
     branches: [ main ]
   workflow_dispatch:
   repository_dispatch:
-    types: [trigger-infra-deploy]
+    types: [lambda-changed]
 
 jobs:
   deploy:
