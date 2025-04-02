@@ -15,7 +15,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     super(scope, id, props);
 
     // S3 bucket for storing audio files and scripts
-    const contentBucket = new s3.Bucket(this, 'AudioTourContentBucket', {
+    const contentBucket = new s3.Bucket(this, 'TensorToursContentBucket', {
+      bucketName: `tensortours-content-${this.region}`,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       cors: [
         {
@@ -29,7 +30,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     });
 
     // CloudFront distribution for audio content delivery
-    const distribution = new cloudfront.Distribution(this, 'AudioTourDistribution', {
+    const distribution = new cloudfront.Distribution(this, 'TensorToursContentDistribution', {
       defaultBehavior: {
         origin: new origins.S3Origin(contentBucket),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -38,7 +39,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     });
 
     // DynamoDB table for caching place data
-    const placesTable = new dynamodb.Table(this, 'PlacesTable', {
+    const placesTable = new dynamodb.Table(this, 'TensorToursPlacesTable', {
+      tableName: 'tensortours-places',
       partitionKey: { name: 'placeId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'tourType', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -47,7 +49,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     });
 
     // Cognito User Pool for authentication
-    const userPool = new cognito.UserPool(this, 'AudioTourUserPool', {
+    const userPool = new cognito.UserPool(this, 'TensorToursUserPool', {
+      userPoolName: 'tensortours-users',
       selfSignUpEnabled: true,
       autoVerify: { email: true },
       standardAttributes: {
@@ -63,7 +66,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
-    const userPoolClient = new cognito.UserPoolClient(this, 'AudioTourUserPoolClient', {
+    const userPoolClient = new cognito.UserPoolClient(this, 'TensorToursUserPoolClient', {
+      userPoolClientName: 'tensortours-app-client',
       userPool,
       authFlows: {
         userPassword: true,
@@ -86,7 +90,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     const elevenlabsApiKeySecret = secretsmanager.Secret.fromSecretNameV2(this, 'ElevenLabsApiKey', 'elevenlabs-api-key');
 
     // Geolocation Place Gathering Lambda
-    const geolocationLambda = new lambda.Function(this, 'GeolocationLambda', {
+    const geolocationLambda = new lambda.Function(this, 'TensorToursGeolocationLambda', {
+      functionName: 'tensortours-geolocation',
       runtime: lambda.Runtime.PYTHON_3_12,
       code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? 'geolocation.zip' : `geolocation-${lambdaVersion}.zip`),
       handler: 'index.handler',
@@ -102,7 +107,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     googleMapsApiKeySecret.grantRead(geolocationLambda);
 
     // Audio Tour Generation Lambda
-    const audioGenerationLambda = new lambda.Function(this, 'AudioGenerationLambda', {
+    const audioGenerationLambda = new lambda.Function(this, 'TensorToursAudioGenerationLambda', {
+      functionName: 'tensortours-audio-generation',
       runtime: lambda.Runtime.PYTHON_3_12,
       code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? 'audio-generation.zip' : `audio-generation-${lambdaVersion}.zip`),
       handler: 'index.handler',
@@ -128,7 +134,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     placesTable.grantReadWriteData(geolocationLambda);
 
     // API Gateway
-    const api = new apigateway.RestApi(this, 'AudioTourAPI', {
+    const api = new apigateway.RestApi(this, 'TensorToursAPI', {
+      restApiName: 'tensortours-api',
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
@@ -136,7 +143,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     });
 
     // Authorizer for protected endpoints
-    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'AudioTourAuthorizer', {
+    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'TensorToursAuthorizer', {
+      authorizerName: 'tensortours-cognito-authorizer',
       cognitoUserPools: [userPool],
     });
 
@@ -166,19 +174,19 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     previewPlaceResource.addMethod('GET', new apigateway.LambdaIntegration(audioGenerationLambda));
 
     // Outputs
-    new cdk.CfnOutput(this, 'UserPoolId', {
+    new cdk.CfnOutput(this, 'TensorToursUserPoolId', {
       value: userPool.userPoolId,
     });
     
-    new cdk.CfnOutput(this, 'UserPoolClientId', {
+    new cdk.CfnOutput(this, 'TensorToursUserPoolClientId', {
       value: userPoolClient.userPoolClientId,
     });
     
-    new cdk.CfnOutput(this, 'ApiEndpoint', {
+    new cdk.CfnOutput(this, 'TensorToursApiEndpoint', {
       value: api.url,
     });
     
-    new cdk.CfnOutput(this, 'ContentDistribution', {
+    new cdk.CfnOutput(this, 'TensorToursContentDistribution', {
       value: distribution.distributionDomainName,
     });
   }
