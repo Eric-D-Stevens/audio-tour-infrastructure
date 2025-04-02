@@ -186,7 +186,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       value: api.url,
     });
     
-    new cdk.CfnOutput(this, 'TensorToursContentDistribution', {
+    new cdk.CfnOutput(this, 'TensorToursContentDistributionUrl', {
       value: distribution.distributionDomainName,
     });
   }
