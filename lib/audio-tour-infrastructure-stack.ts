@@ -161,6 +161,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
         CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
         LAMBDA_VERSION: lambdaVersion,
+        PLACES_TABLE_NAME: placesTable.tableName,
       },
     });
     
