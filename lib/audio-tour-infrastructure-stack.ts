@@ -9,6 +9,8 @@ import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 
 export class AudioTourInfrastructureStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -88,6 +90,20 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     const googleMapsApiKeySecret = secretsmanager.Secret.fromSecretNameV2(this, 'GoogleMapsApiKey', 'google-maps-api-key');
     const openaiApiKeySecret = secretsmanager.Secret.fromSecretNameV2(this, 'OpenAIApiKey', 'openai-api-key');
     const elevenlabsApiKeySecret = secretsmanager.Secret.fromSecretNameV2(this, 'ElevenLabsApiKey', 'elevenlabs-api-key');
+    
+    // SQS Queue for pre-generating tours
+    const tourPreGenerationQueue = new sqs.Queue(this, 'TensorTourPreGenerationQueue', {
+      queueName: 'tensortours-pre-generation-queue',
+      visibilityTimeout: cdk.Duration.minutes(6), // Should be longer than the lambda timeout
+      retentionPeriod: cdk.Duration.days(14),
+      deadLetterQueue: {
+        queue: new sqs.Queue(this, 'TensorTourPreGenerationDLQ', {
+          queueName: 'tensortours-pre-generation-dlq',
+          retentionPeriod: cdk.Duration.days(14),
+        }),
+        maxReceiveCount: 3
+      },
+    });
 
     // Geolocation Place Gathering Lambda
     const geolocationLambda = new lambda.Function(this, 'TensorToursGeolocationLambda', {
@@ -100,6 +116,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
         PLACES_TABLE_NAME: placesTable.tableName,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
         LAMBDA_VERSION: lambdaVersion,
+        TOUR_PREGENERATION_QUEUE_URL: tourPreGenerationQueue.queueUrl,
       },
     });
     
@@ -128,6 +145,40 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     openaiApiKeySecret.grantRead(audioGenerationLambda);
     elevenlabsApiKeySecret.grantRead(audioGenerationLambda);
     googleMapsApiKeySecret.grantRead(audioGenerationLambda);
+
+    // Tour Pre-Generation Lambda
+    const tourPreGenerationLambda = new lambda.Function(this, 'TensorTourPreGenerationLambda', {
+      functionName: 'tensortours-tour-pre-generation',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? 'tour-pre-generation.zip' : `tour-pre-generation-${lambdaVersion}.zip`),
+      handler: 'index.handler',
+      timeout: cdk.Duration.minutes(5), // Longer timeout for API calls and processing
+      memorySize: 1024, // More memory for processing audio
+      environment: {
+        CONTENT_BUCKET_NAME: contentBucket.bucketName,
+        OPENAI_API_KEY_SECRET_NAME: openaiApiKeySecret.secretName,
+        ELEVENLABS_API_KEY_SECRET_NAME: elevenlabsApiKeySecret.secretName,
+        GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
+        CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
+        LAMBDA_VERSION: lambdaVersion,
+      },
+    });
+    
+    // Add SQS event source to the pre-generation lambda
+    tourPreGenerationLambda.addEventSource(new lambdaEventSources.SqsEventSource(tourPreGenerationQueue, {
+      batchSize: 1, // Process one message at a time
+    }));
+    
+    // Grant the pre-generation Lambda function permission to read the secrets
+    openaiApiKeySecret.grantRead(tourPreGenerationLambda);
+    elevenlabsApiKeySecret.grantRead(tourPreGenerationLambda);
+    googleMapsApiKeySecret.grantRead(tourPreGenerationLambda);
+    
+    // Grant the pre-generation Lambda function permission to read/write to S3
+    contentBucket.grantReadWrite(tourPreGenerationLambda);
+    
+    // Grant the geolocation Lambda function permission to send messages to the SQS queue
+    tourPreGenerationQueue.grantSendMessages(geolocationLambda);
 
     // Grant permissions
     contentBucket.grantReadWrite(audioGenerationLambda);
@@ -188,6 +239,10 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     
     new cdk.CfnOutput(this, 'TensorToursContentDistributionUrl', {
       value: distribution.distributionDomainName,
+    });
+    
+    new cdk.CfnOutput(this, 'TensorTourPreGenerationQueueUrl', {
+      value: tourPreGenerationQueue.queueUrl,
     });
   }
 }
