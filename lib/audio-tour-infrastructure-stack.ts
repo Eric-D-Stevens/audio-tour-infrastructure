@@ -165,6 +165,19 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       },
     });
     
+    // Tour Preview Lambda for Guest Mode
+    const tourPreviewLambda = new lambda.Function(this, 'TensorTourPreviewLambda', {
+      functionName: 'tensortours-tour-preview',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? 'tour-preview.zip' : `tour-preview-${lambdaVersion}.zip`),
+      handler: 'index.lambda_handler',
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        LAMBDA_VERSION: lambdaVersion,
+      },
+    });
+    
     // Add SQS event source to the pre-generation lambda
     tourPreGenerationLambda.addEventSource(new lambdaEventSources.SqsEventSource(tourPreGenerationQueue, {
       batchSize: 1, // Process one message at a time
@@ -188,6 +201,10 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     contentBucket.grantReadWrite(audioGenerationLambda);
     placesTable.grantReadWriteData(audioGenerationLambda); // Grant DynamoDB access to audio-generation Lambda
     placesTable.grantReadWriteData(geolocationLambda);
+    
+    // Grant the tour preview Lambda permission to invoke other Lambdas
+    geolocationLambda.grantInvoke(tourPreviewLambda);
+    audioGenerationLambda.grantInvoke(tourPreviewLambda);
 
     // API Gateway
     const api = new apigateway.RestApi(this, 'TensorToursAPI', {
@@ -211,10 +228,10 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
 
-    // Public preview endpoint (no auth)
+    // Public preview endpoint (no auth) - now using the tour-preview Lambda
     const previewResource = api.root.addResource('preview');
     const cityResource = previewResource.addResource('{city}');
-    cityResource.addMethod('GET', new apigateway.LambdaIntegration(geolocationLambda));
+    cityResource.addMethod('GET', new apigateway.LambdaIntegration(tourPreviewLambda));
 
     // Audio generation API
     const audioResource = api.root.addResource('audio');
@@ -224,10 +241,10 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
 
-    // Public audio preview endpoint
+    // Public audio preview endpoint - now using the tour-preview Lambda
     const audioPreviewResource = previewResource.addResource('audio');
     const previewPlaceResource = audioPreviewResource.addResource('{placeId}');
-    previewPlaceResource.addMethod('GET', new apigateway.LambdaIntegration(audioGenerationLambda));
+    previewPlaceResource.addMethod('GET', new apigateway.LambdaIntegration(tourPreviewLambda));
 
     // Outputs
     new cdk.CfnOutput(this, 'TensorToursUserPoolId', {
