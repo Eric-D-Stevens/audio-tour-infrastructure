@@ -186,6 +186,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
 
     // Grant permissions
     contentBucket.grantReadWrite(audioGenerationLambda);
+    placesTable.grantReadWriteData(audioGenerationLambda); // Grant DynamoDB access to audio-generation Lambda
     placesTable.grantReadWriteData(geolocationLambda);
 
     // API Gateway
