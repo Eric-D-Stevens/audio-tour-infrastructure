@@ -178,6 +178,9 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // Grant the pre-generation Lambda function permission to read/write to S3
     contentBucket.grantReadWrite(tourPreGenerationLambda);
     
+    // Grant the pre-generation Lambda function permission to read/write to DynamoDB
+    placesTable.grantReadWriteData(tourPreGenerationLambda);
+    
     // Grant the geolocation Lambda function permission to send messages to the SQS queue
     tourPreGenerationQueue.grantSendMessages(geolocationLambda);
 
