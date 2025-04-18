@@ -30,16 +30,31 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_REGION }}
     
-    - name: Set Lambda version
+    - name: Set Lambda deployment parameters
       run: |
-        # If triggered by lambda-changed event, use the version from the payload
-        # Otherwise use 'latest' as the version
+        # If triggered by lambda-changed event, use the values from the payload
+        # Otherwise use default values
         if [[ "${{ github.event_name }}" == "repository_dispatch" && "${{ github.event.action }}" == "lambda-changed" ]]; then
+          # Set the Lambda version
           echo "LAMBDA_VERSION=${{ github.event.client_payload.version }}" >> $GITHUB_ENV
           echo "Using Lambda version: ${{ github.event.client_payload.version }}"
+          
+          # Set the Lambda package name
+          echo "LAMBDA_PACKAGE=${{ github.event.client_payload.lambda_package }}" >> $GITHUB_ENV
+          echo "Using Lambda package: ${{ github.event.client_payload.lambda_package }}"
+          
+          # Set all Lambda handler paths
+          echo "GEOLOCATION_HANDLER=${{ github.event.client_payload.handlers.geolocation }}" >> $GITHUB_ENV
+          echo "AUDIO_GENERATION_HANDLER=${{ github.event.client_payload.handlers.audio_generation }}" >> $GITHUB_ENV
+          echo "TOUR_PRE_GENERATION_HANDLER=${{ github.event.client_payload.handlers.tour_pre_generation }}" >> $GITHUB_ENV
+          echo "TOUR_PREVIEW_HANDLER=${{ github.event.client_payload.handlers.tour_preview }}" >> $GITHUB_ENV
+          echo "TOUR_GENERATION_HANDLER=${{ github.event.client_payload.handlers.tour_generation }}" >> $GITHUB_ENV
+          echo "Using unified handler paths from client payload"
         else
           echo "LAMBDA_VERSION=latest" >> $GITHUB_ENV
           echo "Using Lambda version: latest"
+          echo "LAMBDA_PACKAGE=tensortours.zip" >> $GITHUB_ENV
+          echo "Using default Lambda package: tensortours.zip"
         fi
     
     - name: Deploy with CDK
@@ -48,3 +63,9 @@ jobs:
         npx cdk deploy --all --require-approval never
       env:
         LAMBDA_VERSION: ${{ env.LAMBDA_VERSION }}
+        LAMBDA_PACKAGE: ${{ env.LAMBDA_PACKAGE }}
+        GEOLOCATION_HANDLER: ${{ env.GEOLOCATION_HANDLER }}
+        AUDIO_GENERATION_HANDLER: ${{ env.AUDIO_GENERATION_HANDLER }}
+        TOUR_PRE_GENERATION_HANDLER: ${{ env.TOUR_PRE_GENERATION_HANDLER }}
+        TOUR_PREVIEW_HANDLER: ${{ env.TOUR_PREVIEW_HANDLER }}
+        TOUR_GENERATION_HANDLER: ${{ env.TOUR_GENERATION_HANDLER }}

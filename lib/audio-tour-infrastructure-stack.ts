@@ -81,10 +81,11 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // Backend Lambda Code Bucket
     const lambdaBucket = s3.Bucket.fromBucketName(this, 'LambdaBucket', process.env.LAMBDA_BUCKET || 'audio-tour-lambda-deployment-bucket-us-west-2');
     
-    // Get Lambda version from environment variable
+    // Get Lambda version and package info from environment variables
     // If not provided, use 'latest' which will use non-versioned files
     const lambdaVersion = process.env.LAMBDA_VERSION || 'latest';
-    console.log(`Deploying with Lambda version: ${lambdaVersion}`);
+    const lambdaPackage = process.env.LAMBDA_PACKAGE || 'tensortours.zip';
+    console.log(`Deploying with Lambda version: ${lambdaVersion}, package: ${lambdaPackage}`);
 
     // Create Secrets Manager resources
     const googleMapsApiKeySecret = secretsmanager.Secret.fromSecretNameV2(this, 'GoogleMapsApiKey', 'google-maps-api-key');
@@ -109,8 +110,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     const geolocationLambda = new lambda.Function(this, 'TensorToursGeolocationLambda', {
       functionName: 'tensortours-geolocation',
       runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? 'geolocation.zip' : `geolocation-${lambdaVersion}.zip`),
-      handler: 'index.handler',
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.GEOLOCATION_HANDLER || 'tensortours.lambda_handlers.geolocation.handler',
       timeout: cdk.Duration.seconds(30),
       environment: {
         PLACES_TABLE_NAME: placesTable.tableName,
@@ -127,8 +128,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     const audioGenerationLambda = new lambda.Function(this, 'TensorToursAudioGenerationLambda', {
       functionName: 'tensortours-audio-generation',
       runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? 'audio-generation.zip' : `audio-generation-${lambdaVersion}.zip`),
-      handler: 'index.handler',
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.AUDIO_GENERATION_HANDLER || 'tensortours.lambda_handlers.audio_generation.handler',
       timeout: cdk.Duration.minutes(5), // Longer timeout for API calls and processing
       memorySize: 1024, // More memory for processing audio
       environment: {
@@ -150,8 +151,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     const tourPreGenerationLambda = new lambda.Function(this, 'TensorTourPreGenerationLambda', {
       functionName: 'tensortours-tour-pre-generation',
       runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? 'tour-pre-generation.zip' : `tour-pre-generation-${lambdaVersion}.zip`),
-      handler: 'index.handler',
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.TOUR_PRE_GENERATION_HANDLER || 'tensortours.lambda_handlers.tour_pre_generation.handler',
       timeout: cdk.Duration.minutes(5), // Longer timeout for API calls and processing
       memorySize: 1024, // More memory for processing audio
       environment: {
@@ -169,8 +170,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     const tourPreviewLambda = new lambda.Function(this, 'TensorTourPreviewLambda', {
       functionName: 'tensortours-tour-preview',
       runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? 'tour-preview.zip' : `tour-preview-${lambdaVersion}.zip`),
-      handler: 'index.lambda_handler',
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.TOUR_PREVIEW_HANDLER || 'tensortours.lambda_handlers.tour_preview.handler',
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
       environment: {
