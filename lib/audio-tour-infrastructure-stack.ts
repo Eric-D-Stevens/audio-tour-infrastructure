@@ -127,7 +127,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // SQS Queue for tour generation (new queue) with proper naming and 3x retry policy
     const generationPhotoQueue = new sqs.Queue(this, 'TTGenerationPhotoQueue', {
       queueName: 'TTGenerationPhotoQueue',
-      visibilityTimeout: cdk.Duration.minutes(6), // Should be longer than the lambda timeout
+      visibilityTimeout: cdk.Duration.minutes(1), // Set to match the lambda timeout
       retentionPeriod: cdk.Duration.days(14),
       deadLetterQueue: {
         queue: new sqs.Queue(this, 'TTGenerationPhotoDLQ', {
@@ -141,7 +141,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // SQS Queue for script generation with 3x retry policy
     const generationScriptQueue = new sqs.Queue(this, 'TTGenerationScriptQueue', {
       queueName: 'TTGenerationScriptQueue',
-      visibilityTimeout: cdk.Duration.minutes(6), // Should be longer than the lambda timeout
+      visibilityTimeout: cdk.Duration.minutes(1), // Set to match the lambda timeout
       retentionPeriod: cdk.Duration.days(14),
       deadLetterQueue: {
         queue: new sqs.Queue(this, 'TTGenerationScriptDLQ', {
@@ -155,7 +155,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // SQS Queue for audio generation with 3x retry policy
     const generationAudioQueue = new sqs.Queue(this, 'TTGenerationAudioQueue', {
       queueName: 'TTGenerationAudioQueue',
-      visibilityTimeout: cdk.Duration.minutes(6), // Should be longer than the lambda timeout
+      visibilityTimeout: cdk.Duration.minutes(1), // Set to match the lambda timeout
       retentionPeriod: cdk.Duration.days(14),
       deadLetterQueue: {
         queue: new sqs.Queue(this, 'TTGenerationAudioDLQ', {
@@ -207,7 +207,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_12,
       code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
       handler: process.env.PHOTO_RETRIEVER_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.photo_retriever_handler',
-      timeout: cdk.Duration.minutes(3),
+      timeout: cdk.Duration.minutes(1),
       memorySize: 512,
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
@@ -225,7 +225,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_12,
       code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
       handler: process.env.SCRIPT_GENERATOR_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.script_generator_handler',
-      timeout: cdk.Duration.minutes(5),
+      timeout: cdk.Duration.minutes(1),
       memorySize: 512,
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
@@ -243,7 +243,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_12,
       code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
       handler: process.env.AUDIO_GENERATOR_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.audio_generator_handler',
-      timeout: cdk.Duration.minutes(5),
+      timeout: cdk.Duration.minutes(1),
       memorySize: 512,
       // Set maximum concurrency limit to 26 to comply with AWS Polly generative voice concurrency limits
       // This sets a ceiling, not a floor - instances will scale from 0 based on actual demand
