@@ -56,7 +56,16 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       partitionKey: { name: 'place_id', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'tour_type', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      removalPolicy: cdk.RemovalPolicy.RETAIN, // Production setting to preserve data
+    });
+    
+    // User Event Table for tracking user actions
+    const userEventTable = new dynamodb.Table(this, 'TTUserEventTable', {
+      tableName: 'TTUserEventTable',
+      partitionKey: { name: 'user_id', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.NUMBER },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN, // Production setting to preserve data
     });
 
     // Cognito User Pool for authentication
@@ -116,7 +125,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     });
     
     // SQS Queue for tour generation (new queue) with proper naming and 3x retry policy
-    const ttGenerationPhotoQueue = new sqs.Queue(this, 'TTGenerationPhotoQueue', {
+    const generationPhotoQueue = new sqs.Queue(this, 'TTGenerationPhotoQueue', {
       queueName: 'TTGenerationPhotoQueue',
       visibilityTimeout: cdk.Duration.minutes(6), // Should be longer than the lambda timeout
       retentionPeriod: cdk.Duration.days(14),
@@ -155,7 +164,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
         TOUR_TABLE_NAME: tourTable.tableName,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
         LAMBDA_VERSION: lambdaVersion,
-        TOUR_GENERATION_QUEUE_URL: ttGenerationPhotoQueue.queueUrl,
+        TOUR_GENERATION_QUEUE_URL: generationPhotoQueue.queueUrl,
+        USER_EVENT_TABLE_NAME: userEventTable.tableName,
       },
     });
     
@@ -238,10 +248,13 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     tourPreGenerationQueue.grantSendMessages(geolocationLambda);
     
     // Grant the get places Lambda function permission to send messages to the new Tour Generation Queue
-    ttGenerationPhotoQueue.grantSendMessages(getPlacesLambda);
+    generationPhotoQueue.grantSendMessages(getPlacesLambda);
     
     // Grant the get places Lambda function permission to read/write to the Tour Table
     tourTable.grantReadWriteData(getPlacesLambda);
+    
+    // Grant the get places Lambda function permission to read/write to the User Event Table
+    userEventTable.grantReadWriteData(getPlacesLambda);
     
     // Grant permissions
     contentBucket.grantReadWrite(audioGenerationLambda);
@@ -322,7 +335,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     });
     
     new cdk.CfnOutput(this, 'TTGenerationPhotoQueueUrl', {
-      value: ttGenerationPhotoQueue.queueUrl,
+      value: generationPhotoQueue.queueUrl,
     });
   }
 }
