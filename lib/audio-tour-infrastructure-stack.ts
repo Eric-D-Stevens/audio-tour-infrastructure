@@ -49,6 +49,15 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       timeToLiveAttribute: 'expiresAt', // TTL for cache freshness
     });
+    
+    // New DynamoDB table for storing tour data
+    const tourTable = new dynamodb.Table(this, 'TTTourTable', {
+      tableName: 'TTTourTable',
+      partitionKey: { name: 'place_id', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'tour_type', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
 
     // Cognito User Pool for authentication
     const userPool = new cognito.UserPool(this, 'TensorToursUserPool', {
@@ -105,6 +114,20 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
         maxReceiveCount: 3
       },
     });
+    
+    // SQS Queue for tour generation (new queue) with proper naming and 3x retry policy
+    const ttGenerationPhotoQueue = new sqs.Queue(this, 'TTGenerationPhotoQueue', {
+      queueName: 'TTGenerationPhotoQueue',
+      visibilityTimeout: cdk.Duration.minutes(6), // Should be longer than the lambda timeout
+      retentionPeriod: cdk.Duration.days(14),
+      deadLetterQueue: {
+        queue: new sqs.Queue(this, 'TTGenerationPhotoDLQ', {
+          queueName: 'TTGenerationPhotoDLQ',
+          retentionPeriod: cdk.Duration.days(14),
+        }),
+        maxReceiveCount: 3
+      },
+    });
 
     // Geolocation Place Gathering Lambda
     const geolocationLambda = new lambda.Function(this, 'TensorToursGeolocationLambda', {
@@ -121,8 +144,24 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       },
     });
     
+    // Get Places Lambda (new Lambda to replace geolocation) with proper naming
+    const getPlacesLambda = new lambda.Function(this, 'TTGetPlacesFunction', {
+      functionName: 'TTGetPlacesFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.GET_PLACES_HANDLER || 'tensortours.lambda_handlers.get_places.handler',
+      timeout: cdk.Duration.seconds(30),
+      environment: {
+        TOUR_TABLE_NAME: tourTable.tableName,
+        GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
+        LAMBDA_VERSION: lambdaVersion,
+        TOUR_GENERATION_QUEUE_URL: ttGenerationPhotoQueue.queueUrl,
+      },
+    });
+    
     // Grant the Lambda function permission to read the secret
     googleMapsApiKeySecret.grantRead(geolocationLambda);
+    googleMapsApiKeySecret.grantRead(getPlacesLambda);
 
     // Audio Tour Generation Lambda
     const audioGenerationLambda = new lambda.Function(this, 'TensorToursAudioGenerationLambda', {
@@ -197,7 +236,13 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     
     // Grant the geolocation Lambda function permission to send messages to the SQS queue
     tourPreGenerationQueue.grantSendMessages(geolocationLambda);
-
+    
+    // Grant the get places Lambda function permission to send messages to the new Tour Generation Queue
+    ttGenerationPhotoQueue.grantSendMessages(getPlacesLambda);
+    
+    // Grant the get places Lambda function permission to read/write to the Tour Table
+    tourTable.grantReadWriteData(getPlacesLambda);
+    
     // Grant permissions
     contentBucket.grantReadWrite(audioGenerationLambda);
     placesTable.grantReadWriteData(audioGenerationLambda); // Grant DynamoDB access to audio-generation Lambda
@@ -205,6 +250,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     
     // Grant the tour preview Lambda permission to invoke other Lambdas
     geolocationLambda.grantInvoke(tourPreviewLambda);
+    getPlacesLambda.grantInvoke(tourPreviewLambda);
     audioGenerationLambda.grantInvoke(tourPreviewLambda);
 
     // API Gateway
@@ -222,9 +268,16 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       cognitoUserPools: [userPool],
     });
 
-    // Geolocation API
+    // Geolocation API (legacy)
     const geoResource = api.root.addResource('places');
     geoResource.addMethod('GET', new apigateway.LambdaIntegration(geolocationLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+    
+    // Get Places API (new endpoint)
+    const getPlacesResource = api.root.addResource('getPlaces');
+    getPlacesResource.addMethod('POST', new apigateway.LambdaIntegration(getPlacesLambda), {
       authorizer,
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
@@ -266,6 +319,10 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     
     new cdk.CfnOutput(this, 'TensorTourPreGenerationQueueUrl', {
       value: tourPreGenerationQueue.queueUrl,
+    });
+    
+    new cdk.CfnOutput(this, 'TTGenerationPhotoQueueUrl', {
+      value: ttGenerationPhotoQueue.queueUrl,
     });
   }
 }
