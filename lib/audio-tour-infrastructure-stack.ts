@@ -384,10 +384,26 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // Grant the Audio Generator Lambda permission to receive messages from the Audio Queue
     generationAudioQueue.grantConsumeMessages(audioGeneratorLambda);
     
+    // Grant AWS Polly speech synthesis permissions to the Audio Generator Lambda
+    const pollyPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'polly:SynthesizeSpeech',
+        'polly:StartSpeechSynthesisTask',
+        'polly:GetSpeechSynthesisTask',
+        'polly:ListSpeechSynthesisTasks'
+      ],
+      resources: ['*']
+    });
+    audioGeneratorLambda.addToRolePolicy(pollyPolicy);
+    
     // Grant permissions for legacy Lambdas
     contentBucket.grantReadWrite(audioGenerationLambda);
     placesTable.grantReadWriteData(audioGenerationLambda); // Grant DynamoDB access to audio-generation Lambda
     placesTable.grantReadWriteData(geolocationLambda);
+    
+    // Grant AWS Polly speech synthesis permissions to the Audio Generation Lambda
+    audioGenerationLambda.addToRolePolicy(pollyPolicy);
     
     // Grant the tour preview Lambda permission to invoke other Lambdas
     geolocationLambda.grantInvoke(tourPreviewLambda);
