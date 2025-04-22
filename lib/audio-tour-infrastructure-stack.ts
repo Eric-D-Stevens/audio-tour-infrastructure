@@ -367,16 +367,22 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     tourTable.grantReadWriteData(photoRetrieverLambda);
     contentBucket.grantReadWrite(photoRetrieverLambda);
     generationScriptQueue.grantSendMessages(photoRetrieverLambda);
+    // Grant the Photo Retriever Lambda permission to receive messages from the Photo Queue
+    generationPhotoQueue.grantConsumeMessages(photoRetrieverLambda);
     
     // Script Generator Lambda permissions
     openaiApiKeySecret.grantRead(scriptGeneratorLambda);
     tourTable.grantReadWriteData(scriptGeneratorLambda);
     contentBucket.grantReadWrite(scriptGeneratorLambda);
     generationAudioQueue.grantSendMessages(scriptGeneratorLambda);
+    // Grant the Script Generator Lambda permission to receive messages from the Script Queue
+    generationScriptQueue.grantConsumeMessages(scriptGeneratorLambda);
     
     // Audio Generator Lambda permissions
     tourTable.grantReadWriteData(audioGeneratorLambda);
     contentBucket.grantReadWrite(audioGeneratorLambda);
+    // Grant the Audio Generator Lambda permission to receive messages from the Audio Queue
+    generationAudioQueue.grantConsumeMessages(audioGeneratorLambda);
     
     // Grant permissions for legacy Lambdas
     contentBucket.grantReadWrite(audioGenerationLambda);
