@@ -137,6 +137,34 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
         maxReceiveCount: 3
       },
     });
+    
+    // SQS Queue for script generation with 3x retry policy
+    const generationScriptQueue = new sqs.Queue(this, 'TTGenerationScriptQueue', {
+      queueName: 'TTGenerationScriptQueue',
+      visibilityTimeout: cdk.Duration.minutes(6), // Should be longer than the lambda timeout
+      retentionPeriod: cdk.Duration.days(14),
+      deadLetterQueue: {
+        queue: new sqs.Queue(this, 'TTGenerationScriptDLQ', {
+          queueName: 'TTGenerationScriptDLQ',
+          retentionPeriod: cdk.Duration.days(14),
+        }),
+        maxReceiveCount: 3
+      },
+    });
+    
+    // SQS Queue for audio generation with 3x retry policy
+    const generationAudioQueue = new sqs.Queue(this, 'TTGenerationAudioQueue', {
+      queueName: 'TTGenerationAudioQueue',
+      visibilityTimeout: cdk.Duration.minutes(6), // Should be longer than the lambda timeout
+      retentionPeriod: cdk.Duration.days(14),
+      deadLetterQueue: {
+        queue: new sqs.Queue(this, 'TTGenerationAudioDLQ', {
+          queueName: 'TTGenerationAudioDLQ',
+          retentionPeriod: cdk.Duration.days(14),
+        }),
+        maxReceiveCount: 3
+      },
+    });
 
     // Geolocation Place Gathering Lambda
     const geolocationLambda = new lambda.Function(this, 'TensorToursGeolocationLambda', {
@@ -173,7 +201,62 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     googleMapsApiKeySecret.grantRead(geolocationLambda);
     googleMapsApiKeySecret.grantRead(getPlacesLambda);
 
-    // Audio Tour Generation Lambda
+    // Photo Retriever Lambda for the Tour Generation Pipeline
+    const photoRetrieverLambda = new lambda.Function(this, 'TTPhotoRetrieverFunction', {
+      functionName: 'TTPhotoRetrieverFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.PHOTO_RETRIEVER_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.photo_retriever_handler',
+      timeout: cdk.Duration.minutes(3),
+      memorySize: 512,
+      environment: {
+        TOUR_TABLE_NAME: tourTable.tableName,
+        CONTENT_BUCKET: contentBucket.bucketName,
+        CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
+        SCRIPT_QUEUE_URL: generationScriptQueue.queueUrl,
+        GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
+        LAMBDA_VERSION: lambdaVersion,
+      },
+    });
+
+    // Script Generator Lambda for the Tour Generation Pipeline
+    const scriptGeneratorLambda = new lambda.Function(this, 'TTScriptGeneratorFunction', {
+      functionName: 'TTScriptGeneratorFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.SCRIPT_GENERATOR_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.script_generator_handler',
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 512,
+      environment: {
+        TOUR_TABLE_NAME: tourTable.tableName,
+        CONTENT_BUCKET: contentBucket.bucketName,
+        CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
+        AUDIO_QUEUE_URL: generationAudioQueue.queueUrl,
+        OPENAI_API_KEY_SECRET_NAME: openaiApiKeySecret.secretName,
+        LAMBDA_VERSION: lambdaVersion,
+      },
+    });
+
+    // Audio Generator Lambda for the Tour Generation Pipeline
+    const audioGeneratorLambda = new lambda.Function(this, 'TTAudioGeneratorFunction', {
+      functionName: 'TTAudioGeneratorFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.AUDIO_GENERATOR_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.audio_generator_handler',
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 512,
+      // Set maximum concurrency limit to 26 to comply with AWS Polly generative voice concurrency limits
+      // This sets a ceiling, not a floor - instances will scale from 0 based on actual demand
+      reservedConcurrentExecutions: 26,
+      environment: {
+        TOUR_TABLE_NAME: tourTable.tableName,
+        CONTENT_BUCKET: contentBucket.bucketName,
+        CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
+        LAMBDA_VERSION: lambdaVersion,
+      },
+    });
+
+    // Audio Tour Generation Lambda (old lambda for reference)
     const audioGenerationLambda = new lambda.Function(this, 'TensorToursAudioGenerationLambda', {
       functionName: 'tensortours-audio-generation',
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -256,7 +339,46 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // Grant the get places Lambda function permission to read/write to the User Event Table
     userEventTable.grantReadWriteData(getPlacesLambda);
     
-    // Grant permissions
+    // Connect queues to Lambda functions via event source mappings
+    // Photo Retriever Lambda is triggered by the Photo Queue
+    new lambda.EventSourceMapping(this, 'PhotoQueueToPhotoRetrieverMapping', {
+      target: photoRetrieverLambda,
+      eventSourceArn: generationPhotoQueue.queueArn,
+      batchSize: 1, // Process one message at a time
+    });
+
+    // Script Generator Lambda is triggered by the Script Queue
+    new lambda.EventSourceMapping(this, 'ScriptQueueToScriptGeneratorMapping', {
+      target: scriptGeneratorLambda,
+      eventSourceArn: generationScriptQueue.queueArn,
+      batchSize: 1, // Process one message at a time
+    });
+    
+    // Audio Generator Lambda is triggered by the Audio Queue
+    new lambda.EventSourceMapping(this, 'AudioQueueToAudioGeneratorMapping', {
+      target: audioGeneratorLambda,
+      eventSourceArn: generationAudioQueue.queueArn,
+      batchSize: 1, // Process one message at a time
+    });
+    
+    // Grant necessary permissions for the pipeline Lambdas
+    // Photo Retriever Lambda permissions
+    googleMapsApiKeySecret.grantRead(photoRetrieverLambda);
+    tourTable.grantReadWriteData(photoRetrieverLambda);
+    contentBucket.grantReadWrite(photoRetrieverLambda);
+    generationScriptQueue.grantSendMessages(photoRetrieverLambda);
+    
+    // Script Generator Lambda permissions
+    openaiApiKeySecret.grantRead(scriptGeneratorLambda);
+    tourTable.grantReadWriteData(scriptGeneratorLambda);
+    contentBucket.grantReadWrite(scriptGeneratorLambda);
+    generationAudioQueue.grantSendMessages(scriptGeneratorLambda);
+    
+    // Audio Generator Lambda permissions
+    tourTable.grantReadWriteData(audioGeneratorLambda);
+    contentBucket.grantReadWrite(audioGeneratorLambda);
+    
+    // Grant permissions for legacy Lambdas
     contentBucket.grantReadWrite(audioGenerationLambda);
     placesTable.grantReadWriteData(audioGenerationLambda); // Grant DynamoDB access to audio-generation Lambda
     placesTable.grantReadWriteData(geolocationLambda);
@@ -336,6 +458,14 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     
     new cdk.CfnOutput(this, 'TTGenerationPhotoQueueUrl', {
       value: generationPhotoQueue.queueUrl,
+    });
+    
+    new cdk.CfnOutput(this, 'TTGenerationScriptQueueUrl', {
+      value: generationScriptQueue.queueUrl,
+    });
+    
+    new cdk.CfnOutput(this, 'TTGenerationAudioQueueUrl', {
+      value: generationAudioQueue.queueUrl,
     });
   }
 }
