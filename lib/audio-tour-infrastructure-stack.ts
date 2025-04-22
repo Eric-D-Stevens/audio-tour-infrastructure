@@ -197,6 +197,20 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       },
     });
     
+    // Get Tour Lambda - for retrieving generated tour content
+    const getTourLambda = new lambda.Function(this, 'TTGetTourFunction', {
+      functionName: 'TTGetTourFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.GET_TOUR_HANDLER || 'tensortours.lambda_handlers.get_tour.handler',
+      timeout: cdk.Duration.seconds(10),
+      environment: {
+        TOUR_TABLE_NAME: tourTable.tableName,
+        LAMBDA_VERSION: lambdaVersion,
+        USER_EVENT_TABLE_NAME: userEventTable.tableName,
+      },
+    });
+    
     // Grant the Lambda function permission to read the secret
     googleMapsApiKeySecret.grantRead(geolocationLambda);
     googleMapsApiKeySecret.grantRead(getPlacesLambda);
@@ -339,6 +353,10 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     // Grant the get places Lambda function permission to read/write to the User Event Table
     userEventTable.grantReadWriteData(getPlacesLambda);
     
+    // Grant permissions for the Get Tour Lambda
+    tourTable.grantReadWriteData(getTourLambda);
+    userEventTable.grantReadWriteData(getTourLambda);
+    
     // Connect queues to Lambda functions via event source mappings
     // Photo Retriever Lambda is triggered by the Photo Queue
     new lambda.EventSourceMapping(this, 'PhotoQueueToPhotoRetrieverMapping', {
@@ -448,6 +466,13 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     const audioResource = api.root.addResource('audio');
     const placeResource = audioResource.addResource('{placeId}');
     placeResource.addMethod('GET', new apigateway.LambdaIntegration(audioGenerationLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+    
+    // Get Tour API (authenticated)
+    const getTourResource = api.root.addResource('getTour');
+    getTourResource.addMethod('POST', new apigateway.LambdaIntegration(getTourLambda), {
       authorizer,
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
