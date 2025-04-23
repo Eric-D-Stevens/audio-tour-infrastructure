@@ -383,7 +383,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     
     // Grant permissions for the Get Preview Tour Lambda (read-only access)
     tourTable.grantReadData(getPreviewTourLambda);
-    userEventTable.grantReadData(getPreviewTourLambda);
+    userEventTable.grantReadWriteData(getPreviewTourLambda);
     contentBucket.grantRead(getPreviewTourLambda);
     
     // Connect queues to Lambda functions via event source mappings
