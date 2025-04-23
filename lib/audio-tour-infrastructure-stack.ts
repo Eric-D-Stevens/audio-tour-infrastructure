@@ -485,6 +485,42 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
 
+    // Get On-Demand Tour Lambda - for retrieving on-demand generated tour content
+    const getOnDemandTourLambda = new lambda.Function(this, 'TTGetOnDemandTourFunction', {
+      functionName: 'TTGetOnDemandTourFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.GET_ON_DEMAND_TOUR_HANDLER || 'tensortours.lambda_handlers.get_on_demand_tour.handler',
+      timeout: cdk.Duration.minutes(2), // Longer timeout as it may involve on-demand generation
+      memorySize: 512, // More memory for processing
+      environment: {
+        TOUR_TABLE_NAME: tourTable.tableName,
+        CONTENT_BUCKET: contentBucket.bucketName,
+        CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
+        LAMBDA_VERSION: lambdaVersion,
+        USER_EVENT_TABLE_NAME: userEventTable.tableName,
+        GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
+        OPENAI_API_KEY_SECRET_NAME: openaiApiKeySecret.secretName,
+      },
+    });
+
+    // Grant necessary permissions for the Get On-Demand Tour Lambda
+    tourTable.grantReadWriteData(getOnDemandTourLambda);
+    userEventTable.grantReadWriteData(getOnDemandTourLambda);
+    contentBucket.grantReadWrite(getOnDemandTourLambda);
+    googleMapsApiKeySecret.grantRead(getOnDemandTourLambda);
+    openaiApiKeySecret.grantRead(getOnDemandTourLambda);
+    
+    // Grant AWS Polly speech synthesis permissions to the Get On-Demand Tour Lambda
+    getOnDemandTourLambda.addToRolePolicy(pollyPolicy);
+
+    // Get On-Demand Tour API (authenticated)
+    const getOnDemandTourResource = api.root.addResource('getOnDemandTour');
+    getOnDemandTourResource.addMethod('POST', new apigateway.LambdaIntegration(getOnDemandTourLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+
     // Public audio preview endpoint - now using the tour-preview Lambda
     const audioPreviewResource = previewResource.addResource('audio');
     const previewPlaceResource = audioPreviewResource.addResource('{placeId}');
