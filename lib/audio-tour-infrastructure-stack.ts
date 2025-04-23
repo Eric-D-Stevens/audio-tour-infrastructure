@@ -247,6 +247,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       handler: process.env.PHOTO_RETRIEVER_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.photo_retriever_handler',
       timeout: cdk.Duration.minutes(1),
       memorySize: 512,
+      // This sets a ceiling, not a floor - instances will scale from 0 based on actual demand
+      reservedConcurrentExecutions: 20,
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
         CONTENT_BUCKET: contentBucket.bucketName,
