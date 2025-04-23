@@ -269,7 +269,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       memorySize: 512,
       // Set maximum concurrency limit to 26 to comply with AWS Polly generative voice concurrency limits
       // This sets a ceiling, not a floor - instances will scale from 0 based on actual demand
-      reservedConcurrentExecutions: 26,
+      reservedConcurrentExecutions: 20,
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
         CONTENT_BUCKET: contentBucket.bucketName,
