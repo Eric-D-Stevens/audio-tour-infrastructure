@@ -29,6 +29,14 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
           allowedHeaders: ['*'],
         },
       ],
+      lifecycleRules: [
+        {
+          id: 'TempFilesExpirationRule',
+          prefix: 'temp/', // Only applies to objects with this prefix
+          expiration: cdk.Duration.days(1), // Files expire after 7 days
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(1), // Cleanup incomplete uploads
+        }
+      ],
     });
 
     // CloudFront distribution for audio content delivery
