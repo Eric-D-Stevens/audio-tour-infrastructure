@@ -381,6 +381,11 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     tourTable.grantReadWriteData(getTourLambda);
     userEventTable.grantReadWriteData(getTourLambda);
     
+    // Grant permissions for the Get Preview Tour Lambda (read-only access)
+    tourTable.grantReadData(getPreviewTourLambda);
+    userEventTable.grantReadData(getPreviewTourLambda);
+    contentBucket.grantRead(getPreviewTourLambda);
+    
     // Connect queues to Lambda functions via event source mappings
     // Photo Retriever Lambda is triggered by the Photo Queue
     new lambda.EventSourceMapping(this, 'PhotoQueueToPhotoRetrieverMapping', {
