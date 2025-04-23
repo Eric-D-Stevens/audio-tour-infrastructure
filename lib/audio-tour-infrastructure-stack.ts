@@ -219,6 +219,22 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       },
     });
     
+    // Get Preview Tour Lambda - for retrieving preview content (no auth required)
+    const getPreviewTourLambda = new lambda.Function(this, 'TTGetPreviewTourFunction', {
+      functionName: 'TTGetPreviewTourFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
+      handler: process.env.GET_PREVIEW_HANDLER || 'tensortours.lambda_handlers.get_preview.handler',
+      timeout: cdk.Duration.seconds(10),
+      environment: {
+        TOUR_TABLE_NAME: tourTable.tableName,
+        LAMBDA_VERSION: lambdaVersion,
+        CONTENT_BUCKET_NAME: contentBucket.bucketName,
+        CONTENT_CLOUDFRONT_DOMAIN: process.env.CONTENT_CLOUDFRONT_DOMAIN || 'd2g5o5njd6p5e.cloudfront.net',
+        USER_EVENT_TABLE_NAME: userEventTable.tableName,
+      },
+    });
+    
     // Grant the Lambda function permission to read the secret
     googleMapsApiKeySecret.grantRead(geolocationLambda);
     googleMapsApiKeySecret.grantRead(getPlacesLambda);
@@ -466,9 +482,15 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
     });
 
     // Public preview endpoint (no auth) - now using the tour-preview Lambda
-    const previewResource = api.root.addResource('preview');
+    const previewResource = api.root.addResource('getPreview');
     const cityResource = previewResource.addResource('{city}');
     cityResource.addMethod('GET', new apigateway.LambdaIntegration(tourPreviewLambda));
+    
+    // Preview tour endpoint (no auth) - for retrieving preview tour data
+    const previewTourResource = api.root.addResource('getPreviewTour');
+    previewTourResource.addMethod('POST', new apigateway.LambdaIntegration(getPreviewTourLambda), {
+      authorizationType: apigateway.AuthorizationType.NONE, // No auth required for previews
+    });
 
     // Audio generation API
     const audioResource = api.root.addResource('audio');
