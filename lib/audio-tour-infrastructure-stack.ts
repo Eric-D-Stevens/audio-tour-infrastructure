@@ -86,9 +86,9 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       },
       customAttributes: {
         // Custom attribute for storing privacy policy version the user agreed to
-        'privacy_policy_version': new cognito.StringAttribute({ mutable: true }),
+        'policyVersion': new cognito.StringAttribute({ mutable: true }),
         // Custom attribute for storing timestamp when user consented to privacy policy
-        'privacy_consent_date': new cognito.StringAttribute({ mutable: true }),
+        'consentDate': new cognito.StringAttribute({ mutable: true }),
       },
       passwordPolicy: {
         minLength: 8,
