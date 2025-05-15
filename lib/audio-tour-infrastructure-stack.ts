@@ -108,6 +108,7 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
         userSrp: true,
       },
       generateSecret: false,
+      refreshTokenValidity: cdk.Duration.days(365), // 1 year token validity
     });
 
     // Backend Lambda Code Bucket
