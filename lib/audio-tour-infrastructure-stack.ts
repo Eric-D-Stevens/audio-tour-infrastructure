@@ -108,8 +108,8 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
         userSrp: true,
       },
       generateSecret: false,
-      accessTokenValidity: cdk.Duration.minutes(5),
-      idTokenValidity: cdk.Duration.minutes(5),
+      accessTokenValidity: cdk.Duration.minutes(300),
+      idTokenValidity: cdk.Duration.minutes(300),
       refreshTokenValidity: cdk.Duration.days(365), // 1 year token validity
     });
 
