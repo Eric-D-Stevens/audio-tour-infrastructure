@@ -12,6 +12,9 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 
+// CDN access key for CloudFront validation
+const TENSORTOURS_CDN_KEY = 'tt-cdn-2026-xK9mP2vL8nQ4';
+
 export class AudioTourInfrastructureStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -39,12 +42,46 @@ export class AudioTourInfrastructureStack extends cdk.Stack {
       ],
     });
 
+    // CloudFront Function to validate app API key
+    // This provides a basic deterrent against unauthorized access to CDN content
+    const appKeyValidationFunction = new cloudfront.Function(this, 'TensorToursAppKeyValidation', {
+      functionName: 'tensortours-app-key-validation',
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  var headers = request.headers;
+  
+  // Check for the app key header
+  var appKey = headers['x-tensortours-key'];
+  
+  // Validate the key (this key should match what's in the app)
+  if (!appKey || appKey.value !== '${TENSORTOURS_CDN_KEY}') {
+    return {
+      statusCode: 403,
+      statusDescription: 'Forbidden',
+      headers: {
+        'content-type': { value: 'text/plain' }
+      },
+      body: 'Access denied'
+    };
+  }
+  
+  // Valid key - allow request to proceed
+  return request;
+}
+      `),
+    });
+
     // CloudFront distribution for audio content delivery
     const distribution = new cloudfront.Distribution(this, 'TensorToursContentDistribution', {
       defaultBehavior: {
         origin: new origins.S3Origin(contentBucket),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+        functionAssociations: [{
+          function: appKeyValidationFunction,
+          eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+        }],
       },
     });
 
