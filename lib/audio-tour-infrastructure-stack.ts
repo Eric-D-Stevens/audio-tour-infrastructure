@@ -11,9 +11,54 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as snsSubscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
+import * as budgets from 'aws-cdk-lib/aws-budgets';
 
 // CDN access key for CloudFront validation
 const TENSORTOURS_CDN_KEY = 'tt-cdn-2026-xK9mP2vL8nQ4';
+
+// ============================================================================
+// COST CONTROL CONFIGURATION
+// Adjust these values to tune spending limits and alerts for your usage
+// ============================================================================
+
+const COST_CONFIG = {
+  // Monthly budget in USD - alerts triggered at 50%, 80%, 100%
+  MONTHLY_BUDGET_USD: 500,
+  BUDGET_ALERT_THRESHOLDS: [50, 80, 100], // percentages
+
+  // API Gateway throttling (requests per second)
+  API_RATE_LIMIT: 100,        // sustained requests/second
+  API_BURST_LIMIT: 200,       // burst capacity
+
+  // Lambda concurrency limits (max concurrent executions)
+  LAMBDA_CONCURRENCY: {
+    PHOTO_RETRIEVER: 100,      // Google Places API calls
+    SCRIPT_GENERATOR: 100,     // OpenAI API calls (~$0.01-0.03 each)
+    AUDIO_GENERATOR: 100,      // AWS Polly calls (~$0.004 each)
+    ON_DEMAND_TOUR: 50,       // Most expensive - script + audio (~$0.05+ each)
+  },
+
+  // CloudWatch alarm thresholds
+  ALARMS: {
+    // CloudFront
+    CLOUDFRONT_BYTES_PER_DAY: 50 * 1024 * 1024 * 1024,  // 50 GB (~2500 audio streams)
+    CLOUDFRONT_REQUESTS_PER_HOUR: 10000,
+
+    // Lambda invocations per hour
+    AUDIO_GEN_INVOCATIONS_PER_HOUR: 500,
+    SCRIPT_GEN_INVOCATIONS_PER_HOUR: 500,
+    ON_DEMAND_TOUR_INVOCATIONS_PER_HOUR: 200,
+
+    // Error and capacity thresholds
+    LAMBDA_ERROR_RATE_PERCENT: 10,
+    DYNAMODB_READ_CAPACITY_PER_MINUTE: 1000,
+    DLQ_MESSAGE_THRESHOLD: 5,
+  },
+};
 
 export class AudioTourInfrastructureStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -303,7 +348,7 @@ function handler(event) {
       timeout: cdk.Duration.minutes(1),
       memorySize: 512,
       // This sets a ceiling, not a floor - instances will scale from 0 based on actual demand
-      reservedConcurrentExecutions: 20,
+      reservedConcurrentExecutions: COST_CONFIG.LAMBDA_CONCURRENCY.PHOTO_RETRIEVER,
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
         CONTENT_BUCKET: contentBucket.bucketName,
@@ -322,6 +367,8 @@ function handler(event) {
       handler: process.env.SCRIPT_GENERATOR_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.script_generator_handler',
       timeout: cdk.Duration.minutes(1),
       memorySize: 512,
+      // Limit concurrency for cost control - OpenAI API calls are expensive (~$0.01-0.03 per call)
+      reservedConcurrentExecutions: COST_CONFIG.LAMBDA_CONCURRENCY.SCRIPT_GENERATOR,
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
         CONTENT_BUCKET: contentBucket.bucketName,
@@ -340,9 +387,9 @@ function handler(event) {
       handler: process.env.AUDIO_GENERATOR_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.audio_generator_handler',
       timeout: cdk.Duration.minutes(1),
       memorySize: 512,
-      // Set maximum concurrency limit to 26 to comply with AWS Polly generative voice concurrency limits
+      // Set maximum concurrency limit to comply with AWS Polly generative voice concurrency limits
       // This sets a ceiling, not a floor - instances will scale from 0 based on actual demand
-      reservedConcurrentExecutions: 20,
+      reservedConcurrentExecutions: COST_CONFIG.LAMBDA_CONCURRENCY.AUDIO_GENERATOR,
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
         CONTENT_BUCKET: contentBucket.bucketName,
@@ -514,12 +561,21 @@ function handler(event) {
     getPlacesLambda.grantInvoke(tourPreviewLambda);
     audioGenerationLambda.grantInvoke(tourPreviewLambda);
 
-    // API Gateway
+    // API Gateway with throttling for cost control
+    // 100 concurrent users * ~10 requests/minute = 1000 requests/minute max
     const api = new apigateway.RestApi(this, 'TensorToursAPI', {
       restApiName: 'tensortours-api',
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
+      },
+      deployOptions: {
+        // Stage-level throttling for cost control
+        throttlingRateLimit: COST_CONFIG.API_RATE_LIMIT,
+        throttlingBurstLimit: COST_CONFIG.API_BURST_LIMIT,
+        // Enable CloudWatch logging for monitoring
+        loggingLevel: apigateway.MethodLoggingLevel.ERROR,
+        metricsEnabled: true,
       },
     });
 
@@ -570,6 +626,7 @@ function handler(event) {
     });
 
     // Get On-Demand Tour Lambda - for retrieving on-demand generated tour content
+    // This is the most expensive Lambda as it does both script (OpenAI) + audio (Polly) generation
     const getOnDemandTourLambda = new lambda.Function(this, 'TTGetOnDemandTourFunction', {
       functionName: 'TTGetOnDemandTourFunction',
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -577,6 +634,8 @@ function handler(event) {
       handler: process.env.GET_ON_DEMAND_TOUR_HANDLER || 'tensortours.lambda_handlers.get_on_demand_tour.handler',
       timeout: cdk.Duration.minutes(2), // Longer timeout as it may involve on-demand generation
       memorySize: 512, // More memory for processing
+      // Strict concurrency limit - this is the most expensive operation (~$0.05+ per call)
+      reservedConcurrentExecutions: COST_CONFIG.LAMBDA_CONCURRENCY.ON_DEMAND_TOUR,
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
         CONTENT_BUCKET: contentBucket.bucketName,
@@ -641,6 +700,197 @@ function handler(event) {
     
     new cdk.CfnOutput(this, 'TTGenerationAudioQueueUrl', {
       value: generationAudioQueue.queueUrl,
+    });
+
+    // ============================================================================
+    // COST CONTROLS AND MONITORING
+    // Designed for ~100 simultaneous users with sensible transfer limits
+    // ============================================================================
+
+    // SNS Topic for cost/usage alerts
+    const alertTopic = new sns.Topic(this, 'TensorToursCostAlerts', {
+      topicName: 'tensortours-cost-alerts',
+      displayName: 'TensorTours Cost and Usage Alerts',
+    });
+
+    // Subscribe email and SMS for alert notifications
+    alertTopic.addSubscription(new snsSubscriptions.EmailSubscription('e.stevens@tensorworks.co'));
+    alertTopic.addSubscription(new snsSubscriptions.SmsSubscription('+13109993742'));
+
+    // Monthly budget alarm with configurable thresholds
+    const monthlyBudget = new budgets.CfnBudget(this, 'TensorToursMonthlyBudget', {
+      budget: {
+        budgetName: 'TensorTours-Monthly-Budget',
+        budgetType: 'COST',
+        timeUnit: 'MONTHLY',
+        budgetLimit: {
+          amount: COST_CONFIG.MONTHLY_BUDGET_USD,
+          unit: 'USD',
+        },
+      },
+      notificationsWithSubscribers: COST_CONFIG.BUDGET_ALERT_THRESHOLDS.map(threshold => ({
+        notification: {
+          notificationType: 'ACTUAL',
+          comparisonOperator: 'GREATER_THAN',
+          threshold: threshold,
+          thresholdType: 'PERCENTAGE',
+        },
+        subscribers: [{ subscriptionType: 'SNS', address: alertTopic.topicArn }],
+      })),
+    });
+
+    // CloudFront data transfer alarm
+    const cloudfrontBytesOutAlarm = new cloudwatch.Alarm(this, 'CloudFrontBytesOutAlarm', {
+      alarmName: 'TensorTours-CloudFront-HighDataTransfer',
+      alarmDescription: `CloudFront data transfer exceeds ${COST_CONFIG.ALARMS.CLOUDFRONT_BYTES_PER_DAY / (1024 * 1024 * 1024)}GB in 24 hours`,
+      metric: new cloudwatch.Metric({
+        namespace: 'AWS/CloudFront',
+        metricName: 'BytesDownloaded',
+        dimensionsMap: {
+          DistributionId: distribution.distributionId,
+          Region: 'Global',
+        },
+        statistic: 'Sum',
+        period: cdk.Duration.hours(24),
+      }),
+      threshold: COST_CONFIG.ALARMS.CLOUDFRONT_BYTES_PER_DAY,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    cloudfrontBytesOutAlarm.addAlarmAction(new cloudwatchActions.SnsAction(alertTopic));
+
+    // CloudFront request count alarm
+    const cloudfrontRequestsAlarm = new cloudwatch.Alarm(this, 'CloudFrontRequestsAlarm', {
+      alarmName: 'TensorTours-CloudFront-HighRequests',
+      alarmDescription: `CloudFront requests exceed ${COST_CONFIG.ALARMS.CLOUDFRONT_REQUESTS_PER_HOUR} per hour`,
+      metric: new cloudwatch.Metric({
+        namespace: 'AWS/CloudFront',
+        metricName: 'Requests',
+        dimensionsMap: {
+          DistributionId: distribution.distributionId,
+          Region: 'Global',
+        },
+        statistic: 'Sum',
+        period: cdk.Duration.hours(1),
+      }),
+      threshold: COST_CONFIG.ALARMS.CLOUDFRONT_REQUESTS_PER_HOUR,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    cloudfrontRequestsAlarm.addAlarmAction(new cloudwatchActions.SnsAction(alertTopic));
+
+    // Audio Generator Lambda invocation alarm
+    // Each audio generation costs ~$0.004 (Polly generative) + Lambda execution
+    const audioGenInvocationsAlarm = new cloudwatch.Alarm(this, 'AudioGenInvocationsAlarm', {
+      alarmName: 'TensorTours-AudioGen-HighInvocations',
+      alarmDescription: `Audio generation Lambda invocations exceed ${COST_CONFIG.ALARMS.AUDIO_GEN_INVOCATIONS_PER_HOUR} per hour`,
+      metric: audioGeneratorLambda.metricInvocations({
+        statistic: 'Sum',
+        period: cdk.Duration.hours(1),
+      }),
+      threshold: COST_CONFIG.ALARMS.AUDIO_GEN_INVOCATIONS_PER_HOUR,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    audioGenInvocationsAlarm.addAlarmAction(new cloudwatchActions.SnsAction(alertTopic));
+
+    // Script Generator Lambda invocation alarm
+    // OpenAI GPT-4o costs ~$0.01-0.03 per script generation
+    const scriptGenInvocationsAlarm = new cloudwatch.Alarm(this, 'ScriptGenInvocationsAlarm', {
+      alarmName: 'TensorTours-ScriptGen-HighInvocations',
+      alarmDescription: `Script generation Lambda invocations exceed ${COST_CONFIG.ALARMS.SCRIPT_GEN_INVOCATIONS_PER_HOUR} per hour`,
+      metric: scriptGeneratorLambda.metricInvocations({
+        statistic: 'Sum',
+        period: cdk.Duration.hours(1),
+      }),
+      threshold: COST_CONFIG.ALARMS.SCRIPT_GEN_INVOCATIONS_PER_HOUR,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    scriptGenInvocationsAlarm.addAlarmAction(new cloudwatchActions.SnsAction(alertTopic));
+
+    // On-Demand Tour Lambda alarm - most expensive as it does both script + audio
+    const onDemandTourInvocationsAlarm = new cloudwatch.Alarm(this, 'OnDemandTourInvocationsAlarm', {
+      alarmName: 'TensorTours-OnDemandTour-HighInvocations',
+      alarmDescription: `On-demand tour generation exceeds ${COST_CONFIG.ALARMS.ON_DEMAND_TOUR_INVOCATIONS_PER_HOUR} per hour`,
+      metric: getOnDemandTourLambda.metricInvocations({
+        statistic: 'Sum',
+        period: cdk.Duration.hours(1),
+      }),
+      threshold: COST_CONFIG.ALARMS.ON_DEMAND_TOUR_INVOCATIONS_PER_HOUR,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    onDemandTourInvocationsAlarm.addAlarmAction(new cloudwatchActions.SnsAction(alertTopic));
+
+    // Lambda error rate alarms - detect issues early
+    const lambdaErrorAlarm = new cloudwatch.Alarm(this, 'LambdaErrorRateAlarm', {
+      alarmName: 'TensorTours-Lambda-HighErrorRate',
+      alarmDescription: `Lambda error rate exceeds ${COST_CONFIG.ALARMS.LAMBDA_ERROR_RATE_PERCENT}% over 15 minutes`,
+      metric: new cloudwatch.MathExpression({
+        expression: 'errors / invocations * 100',
+        usingMetrics: {
+          errors: audioGeneratorLambda.metricErrors({ statistic: 'Sum', period: cdk.Duration.minutes(15) }),
+          invocations: audioGeneratorLambda.metricInvocations({ statistic: 'Sum', period: cdk.Duration.minutes(15) }),
+        },
+        period: cdk.Duration.minutes(15),
+      }),
+      threshold: COST_CONFIG.ALARMS.LAMBDA_ERROR_RATE_PERCENT,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    lambdaErrorAlarm.addAlarmAction(new cloudwatchActions.SnsAction(alertTopic));
+
+    // DynamoDB consumed capacity alarm - detect unexpected read/write spikes
+    const dynamoReadCapacityAlarm = new cloudwatch.Alarm(this, 'DynamoReadCapacityAlarm', {
+      alarmName: 'TensorTours-DynamoDB-HighReadCapacity',
+      alarmDescription: `DynamoDB read capacity exceeds ${COST_CONFIG.ALARMS.DYNAMODB_READ_CAPACITY_PER_MINUTE} RCU per minute`,
+      metric: new cloudwatch.Metric({
+        namespace: 'AWS/DynamoDB',
+        metricName: 'ConsumedReadCapacityUnits',
+        dimensionsMap: {
+          TableName: tourTable.tableName,
+        },
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(1),
+      }),
+      threshold: COST_CONFIG.ALARMS.DYNAMODB_READ_CAPACITY_PER_MINUTE,
+      evaluationPeriods: 3,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    dynamoReadCapacityAlarm.addAlarmAction(new cloudwatchActions.SnsAction(alertTopic));
+
+    // SQS Dead Letter Queue alarm - detect failed message processing
+    const dlqMessagesAlarm = new cloudwatch.Alarm(this, 'DLQMessagesAlarm', {
+      alarmName: 'TensorTours-DLQ-MessagesVisible',
+      alarmDescription: 'Messages in Dead Letter Queue indicate processing failures',
+      metric: new cloudwatch.Metric({
+        namespace: 'AWS/SQS',
+        metricName: 'ApproximateNumberOfMessagesVisible',
+        dimensionsMap: {
+          QueueName: 'TTGenerationAudioDLQ',
+        },
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(5),
+      }),
+      threshold: COST_CONFIG.ALARMS.DLQ_MESSAGE_THRESHOLD,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    dlqMessagesAlarm.addAlarmAction(new cloudwatchActions.SnsAction(alertTopic));
+
+    // Output the alert topic ARN for subscription
+    new cdk.CfnOutput(this, 'CostAlertTopicArn', {
+      value: alertTopic.topicArn,
+      description: 'Subscribe to this SNS topic to receive cost and usage alerts',
     });
   }
 }
