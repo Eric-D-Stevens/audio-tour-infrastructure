@@ -730,9 +730,8 @@ function handler(event) {
       displayName: 'TensorTours Cost and Usage Alerts',
     });
 
-    // Subscribe email and SMS for alert notifications
+    // Subscribe email for alert notifications
     alertTopic.addSubscription(new snsSubscriptions.EmailSubscription('e.stevens@tensorworks.co'));
-    alertTopic.addSubscription(new snsSubscriptions.SmsSubscription('+13109993742'));
 
     // Monthly budget alarm with configurable thresholds
     const monthlyBudget = new budgets.CfnBudget(this, 'TensorToursMonthlyBudget', {
