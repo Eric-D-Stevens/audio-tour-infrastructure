@@ -561,7 +561,21 @@ function handler(event) {
     getPlacesLambda.grantInvoke(tourPreviewLambda);
     audioGenerationLambda.grantInvoke(tourPreviewLambda);
 
+    // CloudWatch Logs role for API Gateway (required for logging)
+    const apiGatewayLogsRole = new iam.Role(this, 'ApiGatewayCloudWatchRole', {
+      assumedBy: new iam.ServicePrincipal('apigateway.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonAPIGatewayPushToCloudWatchLogs'),
+      ],
+    });
+
+    // Set the CloudWatch Logs role at the account level
+    const apiGatewayAccount = new apigateway.CfnAccount(this, 'ApiGatewayAccount', {
+      cloudWatchRoleArn: apiGatewayLogsRole.roleArn,
+    });
+
     // API Gateway with throttling for cost control
+    // Ensure account settings are configured before API deployment
     // 100 concurrent users * ~10 requests/minute = 1000 requests/minute max
     const api = new apigateway.RestApi(this, 'TensorToursAPI', {
       restApiName: 'tensortours-api',
@@ -578,6 +592,9 @@ function handler(event) {
         metricsEnabled: true,
       },
     });
+
+    // Ensure API Gateway account settings are configured before the API stage is deployed
+    api.node.addDependency(apiGatewayAccount);
 
     // Authorizer for protected endpoints
     const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'TensorToursAuthorizer', {
