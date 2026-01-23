@@ -141,7 +141,7 @@ function handler(event) {
       },
       userInvitation: {
         emailSubject: 'Welcome to TensorTours!',
-        emailBody: 'You have been invited to join TensorTours. Your temporary password is {####}',
+        emailBody: 'You have been invited to join TensorTours. Your username is {username} and your temporary password is {####}',
       },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
