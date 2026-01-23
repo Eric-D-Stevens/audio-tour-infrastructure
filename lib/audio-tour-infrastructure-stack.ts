@@ -134,6 +134,15 @@ function handler(event) {
         requireDigits: true,
         requireSymbols: false,
       },
+      userVerification: {
+        emailSubject: 'Verify your TensorTours account',
+        emailBody: 'Welcome to TensorTours! Your AI-powered audio tour guide awaits. Please verify your email address by entering this code in the app: {####}',
+        emailStyle: cognito.VerificationEmailStyle.CODE,
+      },
+      userInvitation: {
+        emailSubject: 'Welcome to TensorTours!',
+        emailBody: 'You have been invited to join TensorTours. Your temporary password is {####}',
+      },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
