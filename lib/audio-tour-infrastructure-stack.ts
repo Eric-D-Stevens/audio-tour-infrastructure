@@ -45,7 +45,7 @@ const COST_CONFIG = {
   // CloudWatch alarm thresholds
   ALARMS: {
     // CloudFront
-    CLOUDFRONT_BYTES_PER_DAY: 50 * 1024 * 1024 * 1024,  // 50 GB (~2500 audio streams)
+    CLOUDFRONT_BYTES_PER_HOUR: 2 * 1024 * 1024 * 1024,  // 2 GB/hour (~100 audio streams/hour)
     CLOUDFRONT_REQUESTS_PER_HOUR: 10000,
 
     // Lambda invocations per hour
@@ -756,10 +756,10 @@ function handler(event) {
       })),
     });
 
-    // CloudFront data transfer alarm
+    // CloudFront data transfer alarm (hourly resolution)
     const cloudfrontBytesOutAlarm = new cloudwatch.Alarm(this, 'CloudFrontBytesOutAlarm', {
       alarmName: 'TensorTours-CloudFront-HighDataTransfer',
-      alarmDescription: `CloudFront data transfer exceeds ${COST_CONFIG.ALARMS.CLOUDFRONT_BYTES_PER_DAY / (1024 * 1024 * 1024)}GB in 24 hours`,
+      alarmDescription: `CloudFront data transfer exceeds ${COST_CONFIG.ALARMS.CLOUDFRONT_BYTES_PER_HOUR / (1024 * 1024 * 1024)}GB per hour`,
       metric: new cloudwatch.Metric({
         namespace: 'AWS/CloudFront',
         metricName: 'BytesDownloaded',
@@ -768,9 +768,9 @@ function handler(event) {
           Region: 'Global',
         },
         statistic: 'Sum',
-        period: cdk.Duration.hours(24),
+        period: cdk.Duration.hours(1),
       }),
-      threshold: COST_CONFIG.ALARMS.CLOUDFRONT_BYTES_PER_DAY,
+      threshold: COST_CONFIG.ALARMS.CLOUDFRONT_BYTES_PER_HOUR,
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
