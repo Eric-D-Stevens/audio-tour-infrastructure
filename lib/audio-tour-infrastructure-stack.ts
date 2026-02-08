@@ -478,6 +478,9 @@ function handler(event) {
     // Grant the get places Lambda function permission to read/write to the Tour Table
     tourTable.grantReadWriteData(getPlacesLambda);
     
+    // Grant the get places Lambda function permission to read from S3 (for Winter Lights data)
+    contentBucket.grantRead(getPlacesLambda);
+    
     // Grant the get places Lambda function permission to read/write to the User Event Table
     userEventTable.grantReadWriteData(getPlacesLambda);
     
