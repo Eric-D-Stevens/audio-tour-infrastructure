@@ -296,6 +296,7 @@ function handler(event) {
       code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
       handler: process.env.GET_PLACES_HANDLER || 'tensortours.lambda_handlers.get_places.handler',
       timeout: cdk.Duration.seconds(30),
+      memorySize: 512, // Increased from default 128MB to speed up cold starts
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
@@ -303,6 +304,13 @@ function handler(event) {
         TOUR_GENERATION_QUEUE_URL: generationPhotoQueue.queueUrl,
         USER_EVENT_TABLE_NAME: userEventTable.tableName,
       },
+    });
+
+    // Create alias with provisioned concurrency to eliminate cold starts on app open
+    const getPlacesAlias = new lambda.Alias(this, 'TTGetPlacesLiveAlias', {
+      aliasName: 'live',
+      version: getPlacesLambda.currentVersion,
+      provisionedConcurrentExecutions: 1,
     });
     
     // Get Tour Lambda - for retrieving generated tour content
@@ -612,9 +620,9 @@ function handler(event) {
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
     
-    // Get Places API (new endpoint)
+    // Get Places API (new endpoint) — routes to the provisioned-concurrency alias
     const getPlacesResource = api.root.addResource('getPlaces');
-    getPlacesResource.addMethod('POST', new apigateway.LambdaIntegration(getPlacesLambda), {
+    getPlacesResource.addMethod('POST', new apigateway.LambdaIntegration(getPlacesAlias), {
       authorizer,
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
