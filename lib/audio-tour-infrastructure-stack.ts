@@ -273,7 +273,7 @@ function handler(event) {
 
     // Geolocation Place Gathering Lambda
     const geolocationLambda = new lambda.DockerImageFunction(this, 'TensorToursGeolocationLambda', {
-      functionName: 'tensortours-geolocation',
+      // functionName: 'tensortours-geolocation', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.geolocation.handler'],
@@ -288,7 +288,7 @@ function handler(event) {
     
     // Get Places Lambda (new Lambda to replace geolocation) with proper naming
     const getPlacesLambda = new lambda.DockerImageFunction(this, 'TTGetPlacesFunction', {
-      functionName: 'TTGetPlacesFunction',
+      // functionName: 'TTGetPlacesFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.get_places.handler'],
@@ -312,7 +312,7 @@ function handler(event) {
     
     // Get Tour Lambda - for retrieving generated tour content
     const getTourLambda = new lambda.DockerImageFunction(this, 'TTGetTourFunction', {
-      functionName: 'TTGetTourFunction',
+      // functionName: 'TTGetTourFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.tour_generation.handler'],
@@ -326,7 +326,7 @@ function handler(event) {
     
     // Get Preview Tour Lambda - for retrieving preview content (no auth required)
     const getPreviewTourLambda = new lambda.DockerImageFunction(this, 'TTGetPreviewTourFunction', {
-      functionName: 'TTGetPreviewTourFunction',
+      // functionName: 'TTGetPreviewTourFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.get_preview.handler'],
@@ -346,7 +346,7 @@ function handler(event) {
 
     // Photo Retriever Lambda for the Tour Generation Pipeline
     const photoRetrieverLambda = new lambda.DockerImageFunction(this, 'TTPhotoRetrieverFunction', {
-      functionName: 'TTPhotoRetrieverFunction',
+      // functionName: 'TTPhotoRetrieverFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.tour_generation_pipeline.photo_retriever_handler'],
@@ -366,7 +366,7 @@ function handler(event) {
 
     // Script Generator Lambda for the Tour Generation Pipeline
     const scriptGeneratorLambda = new lambda.DockerImageFunction(this, 'TTScriptGeneratorFunction', {
-      functionName: 'TTScriptGeneratorFunction',
+      // functionName: 'TTScriptGeneratorFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.tour_generation_pipeline.script_generator_handler'],
@@ -386,7 +386,7 @@ function handler(event) {
 
     // Audio Generator Lambda for the Tour Generation Pipeline
     const audioGeneratorLambda = new lambda.DockerImageFunction(this, 'TTAudioGeneratorFunction', {
-      functionName: 'TTAudioGeneratorFunction',
+      // functionName: 'TTAudioGeneratorFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.tour_generation_pipeline.audio_generator_handler'],
@@ -405,7 +405,7 @@ function handler(event) {
 
     // Audio Tour Generation Lambda (old lambda for reference)
     const audioGenerationLambda = new lambda.DockerImageFunction(this, 'TensorToursAudioGenerationLambda', {
-      functionName: 'tensortours-audio-generation',
+      // functionName: 'tensortours-audio-generation', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.audio_generation.handler'],
@@ -428,7 +428,7 @@ function handler(event) {
 
     // Tour Pre-Generation Lambda
     const tourPreGenerationLambda = new lambda.DockerImageFunction(this, 'TensorTourPreGenerationLambda', {
-      functionName: 'tensortours-tour-pre-generation',
+      // functionName: 'tensortours-tour-pre-generation', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.tour_pre_generation.handler'],
@@ -447,7 +447,7 @@ function handler(event) {
     
     // Tour Preview Lambda for Guest Mode
     const tourPreviewLambda = new lambda.DockerImageFunction(this, 'TensorTourPreviewLambda', {
-      functionName: 'tensortours-tour-preview',
+      // functionName: 'tensortours-tour-preview', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.tour_preview.handler'],
@@ -652,7 +652,7 @@ function handler(event) {
     // Get On-Demand Tour Lambda - for retrieving on-demand generated tour content
     // This is the most expensive Lambda as it does both script (OpenAI) + audio (Polly) generation
     const getOnDemandTourLambda = new lambda.DockerImageFunction(this, 'TTGetOnDemandTourFunction', {
-      functionName: 'TTGetOnDemandTourFunction',
+      // functionName: 'TTGetOnDemandTourFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.get_on_demand_tour.handler'],
@@ -702,7 +702,7 @@ function handler(event) {
     );
 
     const poiInsertLambda = new lambda.DockerImageFunction(this, 'TTPoiInsertFunction', {
-      functionName: 'TTPoiInsertFunction',
+      // functionName: 'TTPoiInsertFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.poi_insert.handler'],
@@ -715,7 +715,7 @@ function handler(event) {
     supabaseDbSecret.grantRead(poiInsertLambda);
 
     const poiQueryLambda = new lambda.DockerImageFunction(this, 'TTPoiQueryFunction', {
-      functionName: 'TTPoiQueryFunction',
+      // functionName: 'TTPoiQueryFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.poi_query.handler'],
@@ -728,7 +728,7 @@ function handler(event) {
     supabaseDbSecret.grantRead(poiQueryLambda);
 
     const poiGetLambda = new lambda.DockerImageFunction(this, 'TTPoiGetFunction', {
-      functionName: 'TTPoiGetFunction',
+      // functionName: 'TTPoiGetFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.poi_get.handler'],
@@ -762,7 +762,7 @@ function handler(event) {
     );
 
     const poiGenerateLambda = new lambda.DockerImageFunction(this, 'TTPoiGenerateFunction', {
-      functionName: 'TTPoiGenerateFunction',
+      // functionName: 'TTPoiGenerateFunction', // TODO: restore after initial container deploy
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
         cmd: ['tensortours.lambda_handlers.poi_generate.handler'],
