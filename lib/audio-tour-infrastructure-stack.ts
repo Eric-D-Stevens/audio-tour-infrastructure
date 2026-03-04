@@ -697,6 +697,69 @@ function handler(event) {
     const previewPlaceResource = audioPreviewResource.addResource('{placeId}');
     previewPlaceResource.addMethod('GET', new apigateway.LambdaIntegration(tourPreviewLambda));
 
+    // ============================================================================
+    // POI (Points of Interest) — Supabase-backed API
+    // ============================================================================
+
+    const supabaseDbSecret = secretsmanager.Secret.fromSecretNameV2(
+      this, 'SupabaseDbSecret', 'tensortours/supabase-points-db'
+    );
+
+    const poiInsertLambda = new lambda.Function(this, 'TTPoiInsertFunction', {
+      functionName: 'TTPoiInsertFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaPackage),
+      handler: 'tensortours.lambda_handlers.poi_insert.handler',
+      timeout: cdk.Duration.seconds(10),
+      environment: {
+        SUPABASE_DB_SECRET_NAME: supabaseDbSecret.secretName,
+        LAMBDA_VERSION: lambdaVersion,
+      },
+    });
+    supabaseDbSecret.grantRead(poiInsertLambda);
+
+    const poiQueryLambda = new lambda.Function(this, 'TTPoiQueryFunction', {
+      functionName: 'TTPoiQueryFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaPackage),
+      handler: 'tensortours.lambda_handlers.poi_query.handler',
+      timeout: cdk.Duration.seconds(10),
+      environment: {
+        SUPABASE_DB_SECRET_NAME: supabaseDbSecret.secretName,
+        LAMBDA_VERSION: lambdaVersion,
+      },
+    });
+    supabaseDbSecret.grantRead(poiQueryLambda);
+
+    const poiGetLambda = new lambda.Function(this, 'TTPoiGetFunction', {
+      functionName: 'TTPoiGetFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaPackage),
+      handler: 'tensortours.lambda_handlers.poi_get.handler',
+      timeout: cdk.Duration.seconds(10),
+      environment: {
+        SUPABASE_DB_SECRET_NAME: supabaseDbSecret.secretName,
+        LAMBDA_VERSION: lambdaVersion,
+      },
+    });
+    supabaseDbSecret.grantRead(poiGetLambda);
+
+    const poiResource = api.root.addResource('poi');
+    poiResource.addMethod('POST', new apigateway.LambdaIntegration(poiInsertLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+    poiResource.addMethod('GET', new apigateway.LambdaIntegration(poiQueryLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+
+    const poiIdResource = poiResource.addResource('{id}');
+    poiIdResource.addMethod('GET', new apigateway.LambdaIntegration(poiGetLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+
     // Outputs
     new cdk.CfnOutput(this, 'TensorToursUserPoolId', {
       value: userPool.userPoolId,
