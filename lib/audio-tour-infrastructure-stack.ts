@@ -4,6 +4,7 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
@@ -204,14 +205,14 @@ function handler(event) {
       refreshTokenValidity: cdk.Duration.days(365), // 1 year token validity
     });
 
-    // Backend Lambda Code Bucket
-    const lambdaBucket = s3.Bucket.fromBucketName(this, 'LambdaBucket', process.env.LAMBDA_BUCKET || 'audio-tour-lambda-deployment-bucket-us-west-2');
-    
-    // Get Lambda version and package info from environment variables
-    // If not provided, use 'latest' which will use non-versioned files
-    const lambdaVersion = process.env.LAMBDA_VERSION || 'latest';
-    const lambdaPackage = process.env.LAMBDA_PACKAGE || 'tensortours.zip';
-    console.log(`Deploying with Lambda version: ${lambdaVersion}, package: ${lambdaPackage}`);
+    // ECR repository for Lambda container images
+    const ecrRepo = new ecr.Repository(this, 'TensorToursLambdaRepo', {
+      repositoryName: 'tensortours-lambda',
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      lifecycleRules: [{ maxImageCount: 5 }],
+    });
+    const imageTag = process.env.LAMBDA_IMAGE_TAG || 'latest';
+    console.log(`Deploying with Lambda image tag: ${imageTag}`);
 
     // Create Secrets Manager resources
     const googleMapsApiKeySecret = secretsmanager.Secret.fromSecretNameV2(this, 'GoogleMapsApiKey', 'google-maps-api-key');
@@ -275,32 +276,32 @@ function handler(event) {
     });
 
     // Geolocation Place Gathering Lambda
-    const geolocationLambda = new lambda.Function(this, 'TensorToursGeolocationLambda', {
+    const geolocationLambda = new lambda.DockerImageFunction(this, 'TensorToursGeolocationLambda', {
       functionName: 'tensortours-geolocation',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.GEOLOCATION_HANDLER || 'tensortours.lambda_handlers.geolocation.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.geolocation.handler'],
+      }),
       timeout: cdk.Duration.seconds(30),
       environment: {
         PLACES_TABLE_NAME: placesTable.tableName,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
-        LAMBDA_VERSION: lambdaVersion,
         TOUR_PREGENERATION_QUEUE_URL: tourPreGenerationQueue.queueUrl,
       },
     });
     
     // Get Places Lambda (new Lambda to replace geolocation) with proper naming
-    const getPlacesLambda = new lambda.Function(this, 'TTGetPlacesFunction', {
+    const getPlacesLambda = new lambda.DockerImageFunction(this, 'TTGetPlacesFunction', {
       functionName: 'TTGetPlacesFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.GET_PLACES_HANDLER || 'tensortours.lambda_handlers.get_places.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.get_places.handler'],
+      }),
       timeout: cdk.Duration.seconds(30),
       memorySize: 512, // Increased from default 128MB to speed up cold starts
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
-        LAMBDA_VERSION: lambdaVersion,
         TOUR_GENERATION_QUEUE_URL: generationPhotoQueue.queueUrl,
         USER_EVENT_TABLE_NAME: userEventTable.tableName,
       },
@@ -314,29 +315,29 @@ function handler(event) {
     });
     
     // Get Tour Lambda - for retrieving generated tour content
-    const getTourLambda = new lambda.Function(this, 'TTGetTourFunction', {
+    const getTourLambda = new lambda.DockerImageFunction(this, 'TTGetTourFunction', {
       functionName: 'TTGetTourFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.GET_TOUR_HANDLER || 'tensortours.lambda_handlers.get_tour.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.tour_generation.handler'],
+      }),
       timeout: cdk.Duration.seconds(10),
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
-        LAMBDA_VERSION: lambdaVersion,
         USER_EVENT_TABLE_NAME: userEventTable.tableName,
       },
     });
     
     // Get Preview Tour Lambda - for retrieving preview content (no auth required)
-    const getPreviewTourLambda = new lambda.Function(this, 'TTGetPreviewTourFunction', {
+    const getPreviewTourLambda = new lambda.DockerImageFunction(this, 'TTGetPreviewTourFunction', {
       functionName: 'TTGetPreviewTourFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.GET_PREVIEW_HANDLER || 'tensortours.lambda_handlers.get_preview.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.get_preview.handler'],
+      }),
       timeout: cdk.Duration.seconds(10),
       environment: {
         TOUR_TABLE_NAME: tourTable.tableName,
-        LAMBDA_VERSION: lambdaVersion,
         CONTENT_BUCKET_NAME: contentBucket.bucketName,
         CONTENT_CLOUDFRONT_DOMAIN: process.env.CONTENT_CLOUDFRONT_DOMAIN || 'd2g5o5njd6p5e.cloudfront.net',
         USER_EVENT_TABLE_NAME: userEventTable.tableName,
@@ -348,11 +349,12 @@ function handler(event) {
     googleMapsApiKeySecret.grantRead(getPlacesLambda);
 
     // Photo Retriever Lambda for the Tour Generation Pipeline
-    const photoRetrieverLambda = new lambda.Function(this, 'TTPhotoRetrieverFunction', {
+    const photoRetrieverLambda = new lambda.DockerImageFunction(this, 'TTPhotoRetrieverFunction', {
       functionName: 'TTPhotoRetrieverFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.PHOTO_RETRIEVER_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.photo_retriever_handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.tour_generation_pipeline.photo_retriever_handler'],
+      }),
       timeout: cdk.Duration.minutes(1),
       memorySize: 512,
       // This sets a ceiling, not a floor - instances will scale from 0 based on actual demand
@@ -363,16 +365,16 @@ function handler(event) {
         CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
         SCRIPT_QUEUE_URL: generationScriptQueue.queueUrl,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
-        LAMBDA_VERSION: lambdaVersion,
       },
     });
 
     // Script Generator Lambda for the Tour Generation Pipeline
-    const scriptGeneratorLambda = new lambda.Function(this, 'TTScriptGeneratorFunction', {
+    const scriptGeneratorLambda = new lambda.DockerImageFunction(this, 'TTScriptGeneratorFunction', {
       functionName: 'TTScriptGeneratorFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.SCRIPT_GENERATOR_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.script_generator_handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.tour_generation_pipeline.script_generator_handler'],
+      }),
       timeout: cdk.Duration.minutes(1),
       memorySize: 512,
       // Limit concurrency for cost control - OpenAI API calls are expensive (~$0.01-0.03 per call)
@@ -383,16 +385,16 @@ function handler(event) {
         CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
         AUDIO_QUEUE_URL: generationAudioQueue.queueUrl,
         OPENAI_API_KEY_SECRET_NAME: openaiApiKeySecret.secretName,
-        LAMBDA_VERSION: lambdaVersion,
       },
     });
 
     // Audio Generator Lambda for the Tour Generation Pipeline
-    const audioGeneratorLambda = new lambda.Function(this, 'TTAudioGeneratorFunction', {
+    const audioGeneratorLambda = new lambda.DockerImageFunction(this, 'TTAudioGeneratorFunction', {
       functionName: 'TTAudioGeneratorFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.AUDIO_GENERATOR_HANDLER || 'tensortours.lambda_handlers.tour_generation_pipeline.audio_generator_handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.tour_generation_pipeline.audio_generator_handler'],
+      }),
       timeout: cdk.Duration.minutes(1),
       memorySize: 512,
       // Set maximum concurrency limit to comply with AWS Polly generative voice concurrency limits
@@ -402,16 +404,16 @@ function handler(event) {
         TOUR_TABLE_NAME: tourTable.tableName,
         CONTENT_BUCKET: contentBucket.bucketName,
         CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
-        LAMBDA_VERSION: lambdaVersion,
       },
     });
 
     // Audio Tour Generation Lambda (old lambda for reference)
-    const audioGenerationLambda = new lambda.Function(this, 'TensorToursAudioGenerationLambda', {
+    const audioGenerationLambda = new lambda.DockerImageFunction(this, 'TensorToursAudioGenerationLambda', {
       functionName: 'tensortours-audio-generation',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.AUDIO_GENERATION_HANDLER || 'tensortours.lambda_handlers.audio_generation.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.audio_generation.handler'],
+      }),
       timeout: cdk.Duration.minutes(5), // Longer timeout for API calls and processing
       memorySize: 1024, // More memory for processing audio
       environment: {
@@ -420,7 +422,6 @@ function handler(event) {
         ELEVENLABS_API_KEY_SECRET_NAME: elevenlabsApiKeySecret.secretName,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
         CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
-        LAMBDA_VERSION: lambdaVersion,
       },
     });
     
@@ -430,11 +431,12 @@ function handler(event) {
     googleMapsApiKeySecret.grantRead(audioGenerationLambda);
 
     // Tour Pre-Generation Lambda
-    const tourPreGenerationLambda = new lambda.Function(this, 'TensorTourPreGenerationLambda', {
+    const tourPreGenerationLambda = new lambda.DockerImageFunction(this, 'TensorTourPreGenerationLambda', {
       functionName: 'tensortours-tour-pre-generation',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.TOUR_PRE_GENERATION_HANDLER || 'tensortours.lambda_handlers.tour_pre_generation.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.tour_pre_generation.handler'],
+      }),
       timeout: cdk.Duration.minutes(5), // Longer timeout for API calls and processing
       memorySize: 1024, // More memory for processing audio
       environment: {
@@ -443,22 +445,20 @@ function handler(event) {
         ELEVENLABS_API_KEY_SECRET_NAME: elevenlabsApiKeySecret.secretName,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
         CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
-        LAMBDA_VERSION: lambdaVersion,
         PLACES_TABLE_NAME: placesTable.tableName,
       },
     });
     
     // Tour Preview Lambda for Guest Mode
-    const tourPreviewLambda = new lambda.Function(this, 'TensorTourPreviewLambda', {
+    const tourPreviewLambda = new lambda.DockerImageFunction(this, 'TensorTourPreviewLambda', {
       functionName: 'tensortours-tour-preview',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.TOUR_PREVIEW_HANDLER || 'tensortours.lambda_handlers.tour_preview.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.tour_preview.handler'],
+      }),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
-      environment: {
-        LAMBDA_VERSION: lambdaVersion,
-      },
+      environment: {},
     });
     
     // Add SQS event source to the pre-generation lambda
@@ -655,11 +655,12 @@ function handler(event) {
 
     // Get On-Demand Tour Lambda - for retrieving on-demand generated tour content
     // This is the most expensive Lambda as it does both script (OpenAI) + audio (Polly) generation
-    const getOnDemandTourLambda = new lambda.Function(this, 'TTGetOnDemandTourFunction', {
+    const getOnDemandTourLambda = new lambda.DockerImageFunction(this, 'TTGetOnDemandTourFunction', {
       functionName: 'TTGetOnDemandTourFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaVersion === 'latest' ? lambdaPackage : lambdaPackage),
-      handler: process.env.GET_ON_DEMAND_TOUR_HANDLER || 'tensortours.lambda_handlers.get_on_demand_tour.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.get_on_demand_tour.handler'],
+      }),
       timeout: cdk.Duration.minutes(2), // Longer timeout as it may involve on-demand generation
       memorySize: 512, // More memory for processing
       // Strict concurrency limit - this is the most expensive operation (~$0.05+ per call)
@@ -668,7 +669,6 @@ function handler(event) {
         TOUR_TABLE_NAME: tourTable.tableName,
         CONTENT_BUCKET: contentBucket.bucketName,
         CLOUDFRONT_DOMAIN: distribution.distributionDomainName,
-        LAMBDA_VERSION: lambdaVersion,
         USER_EVENT_TABLE_NAME: userEventTable.tableName,
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
         OPENAI_API_KEY_SECRET_NAME: openaiApiKeySecret.secretName,
@@ -705,41 +705,41 @@ function handler(event) {
       this, 'SupabaseDbSecret', 'tensortours/supabase-points-db'
     );
 
-    const poiInsertLambda = new lambda.Function(this, 'TTPoiInsertFunction', {
+    const poiInsertLambda = new lambda.DockerImageFunction(this, 'TTPoiInsertFunction', {
       functionName: 'TTPoiInsertFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaPackage),
-      handler: 'tensortours.lambda_handlers.poi_insert.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.poi_insert.handler'],
+      }),
       timeout: cdk.Duration.seconds(10),
       environment: {
         SUPABASE_DB_SECRET_NAME: supabaseDbSecret.secretName,
-        LAMBDA_VERSION: lambdaVersion,
       },
     });
     supabaseDbSecret.grantRead(poiInsertLambda);
 
-    const poiQueryLambda = new lambda.Function(this, 'TTPoiQueryFunction', {
+    const poiQueryLambda = new lambda.DockerImageFunction(this, 'TTPoiQueryFunction', {
       functionName: 'TTPoiQueryFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaPackage),
-      handler: 'tensortours.lambda_handlers.poi_query.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.poi_query.handler'],
+      }),
       timeout: cdk.Duration.seconds(10),
       environment: {
         SUPABASE_DB_SECRET_NAME: supabaseDbSecret.secretName,
-        LAMBDA_VERSION: lambdaVersion,
       },
     });
     supabaseDbSecret.grantRead(poiQueryLambda);
 
-    const poiGetLambda = new lambda.Function(this, 'TTPoiGetFunction', {
+    const poiGetLambda = new lambda.DockerImageFunction(this, 'TTPoiGetFunction', {
       functionName: 'TTPoiGetFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaPackage),
-      handler: 'tensortours.lambda_handlers.poi_get.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.poi_get.handler'],
+      }),
       timeout: cdk.Duration.seconds(10),
       environment: {
         SUPABASE_DB_SECRET_NAME: supabaseDbSecret.secretName,
-        LAMBDA_VERSION: lambdaVersion,
       },
     });
     supabaseDbSecret.grantRead(poiGetLambda);
@@ -765,18 +765,18 @@ function handler(event) {
       this, 'GeminiApiKey', 'gemini-api-key'
     );
 
-    const poiGenerateLambda = new lambda.Function(this, 'TTPoiGenerateFunction', {
+    const poiGenerateLambda = new lambda.DockerImageFunction(this, 'TTPoiGenerateFunction', {
       functionName: 'TTPoiGenerateFunction',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      code: lambda.Code.fromBucket(lambdaBucket, lambdaPackage),
-      handler: 'tensortours.lambda_handlers.poi_generate.handler',
+      code: lambda.DockerImageCode.fromEcr(ecrRepo, {
+        tagOrDigest: imageTag,
+        cmd: ['tensortours.lambda_handlers.poi_generate.handler'],
+      }),
       timeout: cdk.Duration.seconds(60),   // Gemini + web search needs headroom
       memorySize: 512,
       environment: {
         SUPABASE_DB_SECRET_NAME: supabaseDbSecret.secretName,
         GEMINI_API_KEY_SECRET_NAME: 'gemini-api-key',
         GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
-        LAMBDA_VERSION: lambdaVersion,
       },
     });
     supabaseDbSecret.grantRead(poiGenerateLambda);
