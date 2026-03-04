@@ -315,7 +315,7 @@ function handler(event) {
       functionName: 'TTGetTourFunction',
       code: lambda.DockerImageCode.fromEcr(ecrRepo, {
         tagOrDigest: imageTag,
-        cmd: ['tensortours.lambda_handlers.tour_generation.handler'],
+        cmd: ['tensortours.lambda_handlers.get_tour.handler'],
       }),
       timeout: cdk.Duration.seconds(10),
       environment: {
