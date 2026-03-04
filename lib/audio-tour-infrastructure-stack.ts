@@ -760,6 +760,36 @@ function handler(event) {
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
 
+    // POI Generate Lambda — runs the 4-stage Gemini generation pipeline
+    const geminiApiKeySecret = secretsmanager.Secret.fromSecretNameV2(
+      this, 'GeminiApiKey', 'gemini-api-key'
+    );
+
+    const poiGenerateLambda = new lambda.Function(this, 'TTPoiGenerateFunction', {
+      functionName: 'TTPoiGenerateFunction',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      code: lambda.Code.fromBucket(lambdaBucket, lambdaPackage),
+      handler: 'tensortours.lambda_handlers.poi_generate.handler',
+      timeout: cdk.Duration.seconds(60),   // Gemini + web search needs headroom
+      memorySize: 512,
+      environment: {
+        SUPABASE_DB_SECRET_NAME: supabaseDbSecret.secretName,
+        GEMINI_API_KEY_SECRET_NAME: 'gemini-api-key',
+        GOOGLE_MAPS_API_KEY_SECRET_NAME: googleMapsApiKeySecret.secretName,
+        LAMBDA_VERSION: lambdaVersion,
+      },
+    });
+    supabaseDbSecret.grantRead(poiGenerateLambda);
+    geminiApiKeySecret.grantRead(poiGenerateLambda);
+    googleMapsApiKeySecret.grantRead(poiGenerateLambda);
+
+    // POST /poi/generate — sub-resource under the existing /poi resource
+    const poiGenerateResource = poiResource.addResource('generate');
+    poiGenerateResource.addMethod('POST', new apigateway.LambdaIntegration(poiGenerateLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+
     // Outputs
     new cdk.CfnOutput(this, 'TensorToursUserPoolId', {
       value: userPool.userPoolId,
