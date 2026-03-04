@@ -205,12 +205,8 @@ function handler(event) {
       refreshTokenValidity: cdk.Duration.days(365), // 1 year token validity
     });
 
-    // ECR repository for Lambda container images
-    const ecrRepo = new ecr.Repository(this, 'TensorToursLambdaRepo', {
-      repositoryName: 'tensortours-lambda',
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      lifecycleRules: [{ maxImageCount: 5 }],
-    });
+    // ECR repository for Lambda container images (pre-created manually for bootstrap)
+    const ecrRepo = ecr.Repository.fromRepositoryName(this, 'TensorToursLambdaRepo', 'tensortours-lambda');
     const imageTag = process.env.LAMBDA_IMAGE_TAG || 'latest';
     console.log(`Deploying with Lambda image tag: ${imageTag}`);
 
